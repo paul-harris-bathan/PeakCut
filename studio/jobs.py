@@ -12,7 +12,7 @@ import traceback
 import uuid
 from pathlib import Path
 
-from . import ai, brain, config, creators, ctx, facecam, fetch_model, games, hashtags, load, media, quality, render, roman, safe, templates, transcribe, usage
+from . import ai, brain, clipcheck, config, creators, ctx, facecam, fetch_model, games, hashtags, load, media, quality, render, roman, safe, templates, transcribe, usage
 
 class _FairQueue:
     """Whose video is next. Each person has their own line and the lines take turns, so someone who adds ten
@@ -841,7 +841,9 @@ def render_one(job, clip, words):
         need, got_h = int((job.get("options") or {}).get("quality") or 1080), int(job.get("height") or 0)
         clip["soft"] = bool(got_h and need > 1080 and got_h < need / 2)     # e.g. a 720p video with a zoomed-in cam
         out = render.render_clip(src, d / "clips", clip["id"], local, near, job["width"], job["height"], extras=extras)
-        clip.update(out, status="done", version=clip.get("version", 0) + 1, error=None)
+        # warnings to see before posting: no sound, too quiet or crackling, a black or frozen picture (never fails a clip)
+        checks = clipcheck.check(d / "clips" / out["file"], local["end"] - local["start"], src, local["start"]) if CLIP_CHECKS else []
+        clip.update(out, status="done", version=clip.get("version", 0) + 1, error=None, checks=checks)
         post = {k: clip[k] for k in ("title", "description", "hashtags", "hook", "start", "end", "score")}
         (d / "clips" / f"{clip['id']}.json").write_text(json.dumps(post, indent=1), encoding="utf-8")
         if clip["version"] == 1:
@@ -860,6 +862,7 @@ def render_one(job, clip, words):
 
 
 CLIP_MINUTES = float(config.env("PEAKCUT_CLIP_MINUTES", "15"))     # the longest one clip may take to make
+CLIP_CHECKS = config.env("PEAKCUT_CLIP_CHECKS", "1").strip() != "0"  # look for silent, quiet, black or frozen clips (0: off)
 
 
 def _wait_for_clips(job, futures, began, workers):

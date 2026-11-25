@@ -2178,6 +2178,9 @@ textarea.cpg-in{height:auto;padding:8px 12px;resize:vertical}.cpg-in:focus{borde
 .lang-sel select{flex:1;appearance:none;border:0;background:transparent;font:inherit;font-size:14px;font-weight:600;color:var(--text);cursor:pointer;outline:none;min-width:0}
 .hq-note{display:flex;align-items:center;gap:7px;margin:8px 4px 0;font-size:12.5px;color:var(--dim)}
 .hq-note[hidden]{display:none}.hq-note svg{width:14px;height:14px;color:var(--brand-deep);flex:none}
+.hq-note.bad{color:var(--bad)}.hq-note.bad svg{color:var(--bad)}
+.clip-warn{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12.5px;color:var(--bad);min-width:0}
+.clip-warn svg{width:14px;height:14px;flex:none}.clip-warn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* the cam's own corners and border (the border drawn over the picture, inside the box, as in the clip) */
 .tp9-cam.styled{border:0}
 .tp9-cam.styled::before{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:var(--cb,none);z-index:1;pointer-events:none}
@@ -3950,6 +3953,7 @@ function clipHtml(j, c) {
     <div class="clip-body">
       <div class="ttl2" title="${esc(c.title || c.hook || "")}">${esc(c.title || c.hook || "Untitled clip")}</div>
       ${c.status === "done" ? clipWhere(c) : ""}
+      ${c.status === "done" && c.checks?.length ? `<div class="clip-warn" title="${esc(c.checks.map(x => x.text).join(" "))}">${ic("warn")}<span>${esc(c.checks[0].text)}${c.checks.length > 1 ? ` (+${c.checks.length - 1} more)` : ""}</span></div>` : ""}
       <div class="clip-foot">
         ${busyClip ? "" : `<label class="selck" title="Select this clip"><input type="checkbox" data-sel="${key}" ${sel().has(key) ? "checked" : ""} aria-label="Select this clip"></label>`}
         ${c.status === "done" ? `<a class="btn sm icon ghost" href="${m}${esc(c.file)}?download=1" title="Download" aria-label="Download">${ic("down")}</a>` : ""}
@@ -5843,7 +5847,8 @@ function drawClipDlg(full) {
         <div class="ce3-f"><label>Hashtags</label><input data-tx="hashtags" value="${esc((c.hashtags || []).map(t => "#" + t).join(" "))}" placeholder="#gaming #clips"></div>
         ${["done", "error"].includes(c.status) ? `<div class="ce3-f"><label>Style</label><div class="ce3-tpl">${tplChip("cd_tpl", tplOf(c.template) ? c.template : "", {made: !tplOf(c.template)})}
           <button class="btn sm primary" data-act="cdremake" hidden>${ic("scissors")}Make again</button></div>
-          ${c.soft ? `<p class="hq-note">${ic("warn")}This video is low quality, so the zoomed-in part may look soft.</p>` : ""}</div>` : ""}
+          ${c.soft ? `<p class="hq-note">${ic("warn")}This video is low quality, so the zoomed-in part may look soft.</p>` : ""}
+          ${c.status === "done" ? (c.checks || []).map(x => `<p class="hq-note bad">${ic("warn")}${esc(x.text)}</p>`).join("") : ""}</div>` : ""}
         <div class="ce3-line"></div>
         <div id="dposts"></div>
         ${c.status !== "done" ? `<p class="ce2-note">${c.status === "error" ? "This clip couldn't be made, so it can't be posted." : "It can be posted once it's made."}</p>` : postSoon() ? soonBox() : accs.length ? (accs.every(gone) ? `<p class="ce2-note">It's going to every account you have.</p>` : `

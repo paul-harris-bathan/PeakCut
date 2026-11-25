@@ -86,6 +86,7 @@ def main() -> int:
                 ("YouTube limits wait instead of failing; videos gone from YouTube stop showing as posted", ["tests/test_yt_limits.py"]),
                 ("video quality follows the style", ["tests/test_quality.py"]),
                 ("clips on the graphics card, with a fallback", ["tests/test_encoders.py"]),
+                ("each clip checked: no sound, quiet, crackling, black or frozen", ["tests/test_clipcheck.py"]),
                 ("the streamer's cam found by the AI on real frames, checked", ["tests/test_facecam_ai.py"]),
                 ("admin account list, any size", ["tests/test_admin_users.py"]),
                 ("feedback: seen on view, removable", ["tests/test_feedback.py"]),
