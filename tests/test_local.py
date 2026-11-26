@@ -74,12 +74,12 @@ check("changing service without a key is refused, and the old key is not carried
 r = put({"provider": "ollama", "models": "llama"})
 check("a model on this machine needs no key", (r.status_code, r.json()["ready"], ai.key()), (200, True, ""))
 put({"provider": "gemini", "models": "model-a", "key": KEY})
-check("removing from another website is refused", (c.delete("/api/ai", headers={"Origin": "https://evil.example"}).status_code, ai.key()), (403, KEY))
-r = c.delete("/api/ai", headers=ORIGIN)
-check("the key can be removed", (r.status_code, r.json()["has_key"], r.json()["ready"], r.json()["saved_here"], ai.key()), (200, False, False, False, ""))
-check("...and it is gone from the data folder", (config.DATA_DIR / "ai.json").exists(), False)
+check("removing the key from another website is refused", (c.delete("/api/ai/key", headers={"Origin": "https://evil.example"}).status_code, ai.key()), (403, KEY))
+r = c.delete("/api/ai/key", headers=ORIGIN)
+check("the key can be removed", (r.status_code, r.json()["has_key"], r.json()["ready"], ai.key()), (200, False, False, ""))
+check("...and it is gone from the data folder", json.loads((config.DATA_DIR / "ai.json").read_text())["key"], "")
 check("...and every page says the AI is not set up", c.get("/api/status").json()["ai"]["ready"], False)
-check("removing again does no harm", c.delete("/api/ai", headers=ORIGIN).status_code, 200)
+check("removing again does no harm", c.delete("/api/ai/key", headers=ORIGIN).status_code, 200)
 
 
 # ---- finding models and testing, with the network replaced
