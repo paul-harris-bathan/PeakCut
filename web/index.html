@@ -6366,6 +6366,7 @@ async function spkLoad(vid = SPK.vid) {
   try {
     SPK.list = await api("/api/spikes");
     if (vid) SPK.data = await api(`/api/spikes/${encodeURIComponent(vid)}?s=${SPK.s}`).catch(() => null);
+    if ((SPK.data ? vid : "") !== SPK.vid) SPK.tpl = "";    // another VOD: its streamer's own style again
     SPK.vid = SPK.data ? vid : "";
   } catch (e) { toast(e.message, "bad"); }
   if (S.view !== "spikes") return;
@@ -6421,6 +6422,14 @@ function spkState(d, t) {
               dropped: ["bad", "Left out"], muted: ["mute", "Twitch muted"]}[s.clip || "queued"] || ["wait", "Making…"];
   return {k: st[0], label: st[1], tip: s.error || "", retry: s.clip === "error" && !going};
 }
+function spkTpl(d) {
+  // the style the ticked spikes are made in: the one picked here, else the streamer's own, else the account's default
+  if (SPK.tpl && tplOf(SPK.tpl)) return SPK.tpl;
+  const login = (d.login || "").toLowerCase();
+  const c = login && S.creators.find(x => (String(x.channels?.twitch || x.channel || "").toLowerCase().split("twitch.tv/")[1] || "").split(/[/?#]/)[0] === login);
+  return c && tplOf(c.template) ? c.template : S.tpl.default;
+}
+document.addEventListener("change", e => { if (e.target.id === "spk_tpl") SPK.tpl = e.target.value; });
 function spkList(d) {
   const big = (d.spikes || []).filter(s => s.level === "big"), minor = (d.spikes || []).filter(s => s.level === "minor");
   const keys = d.keys || {}, ready = keys.ai && keys.eleven, cl = d.clips;
@@ -6432,11 +6441,11 @@ function spkList(d) {
   const need = !ready ? `<p class="hq-note bad">${ic("warn")}${!keys.ai ? "Add your AI key" : "Add your ElevenLabs key"} on the AI page to clip spikes. Then tick the spikes you want.
       <button class="btn sm" data-act="go" data-v="usage">Open AI page</button></p>` : "";
   const open = cl ? `<div class="row spk-open"><span class="sub">${esc(cl.stage || "")}</span><button class="btn sm" data-act="go" data-v="${cl.creator ? "c:" + esc(cl.creator) : "library"}">${ic("film")}Open the clips</button></div>` : "";
-  const picker = ready && [...big, ...minor].some(s => { const st = spkState(d, s.t); return !st || st.retry; }) ? `<button class="btn primary sm" data-act="spkmake">${ic("scissors")}Make clips from ticked spikes</button>` : "";
+  const picker = ready && [...big, ...minor].some(s => { const st = spkState(d, s.t); return !st || st.retry; }) ? `${tplAll().length ? tplChip("spk_tpl", spkTpl(d)) : ""}<button class="btn primary sm" data-act="spkmake">${ic("scissors")}Make clips from ticked spikes</button>` : "";
   return `${need}${open}<div class="spk-lists"><section><h3>Big spikes <span class="sub">(${big.length})</span></h3><p class="help">The strongest moments. Tick the ones you want clipped.</p>
       ${big.length ? `<ul class="spk-ul">${big.map(row).join("")}</ul>` : `<p class="sub">None at this setting.</p>`}</section>
     <section><h3>Worth a look <span class="sub">(${minor.length})</span></h3>${minor.length ? `<ul class="spk-ul">${minor.map(row).join("")}</ul>` : `<p class="sub">None at this setting.</p>`}</section></div>
-    ${picker ? `<div class="row" style="margin-top:12px">${picker}</div>` : ""}`;
+    ${picker ? `<div class="row" style="margin-top:12px;gap:10px;flex-wrap:wrap;align-items:center">${picker}</div>` : ""}`;
 }
 function drawSpikes() {
   const box = $("#spk"); if (!box) return;
@@ -6665,7 +6674,8 @@ document.addEventListener("click", async e => {
       const times = [...document.querySelectorAll("[data-spkpick]:checked")].map(x => Number(x.value));
       if (!times.length) return toast("Tick the spikes you want clipped.", "bad");
       b.disabled = true;
-      try { await send(`/api/spikes/${encodeURIComponent(SPK.vid)}/clip`, {times}); toast(`Making ${times.length} spike clip${times.length > 1 ? "s" : ""}.`, "ok"); await spkLoad(); }
+      const template = $("#spk_tpl")?.value || "";
+      try { await send(`/api/spikes/${encodeURIComponent(SPK.vid)}/clip`, {times, template}); toast(`Making ${times.length} spike clip${times.length > 1 ? "s" : ""}.`, "ok"); await spkLoad(); }
       finally { b.disabled = false; }
       return;
     }

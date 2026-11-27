@@ -143,6 +143,24 @@ with ctx.as_user(u):
     check("the spike page sees each spike's clip", [(x["t"], x["clip"]) for x in s["spikes"]], [(100, "done"), (450, "error")])
     check("the clip shows in the videos list like any other", any(j["id"] == job["id"] for j in jobs.list_jobs()))
 
+    # the style picked on the spike page: these spikes' clips are made in it
+    from studio import templates
+    other = next(t for t in templates.all_templates()["builtin"] if t["id"] != templates.default_id())
+    scan4 = dict(scan, id="3333333333")
+    j4 = spikeclip.clip_spikes(scan4, [100], template=other["id"])
+    check("the picked style goes with the ticked spike and the new video", (j4["spikes"][0].get("template"), j4["options"]["template"]), (other["id"], other["id"]))
+    spikeclip.run(j4)
+    c4 = j4["clips"][0]
+    check("its clip is made in the picked style", (c4["status"], c4["template"], c4["look"] == templates.clean_look(other["look"]), c4["layout"]),
+          ("done", other["id"], True, templates.clean_look(other["look"])["layout"]))
+    third = next(t for t in templates.all_templates()["builtin"] if t["id"] not in (other["id"], templates.default_id()))
+    spikeclip.clip_spikes(scan4, [300], template=third["id"])
+    spikeclip.run(j4)
+    check("a later tick in another style: that clip in that style, the first one left as it was",
+          [c_["template"] for c_ in j4["clips"]], [other["id"], third["id"]])
+    j5 = spikeclip.clip_spikes(dict(scan, id="3333333334"), [100], template="t-nothere")
+    check("a style that doesn't exist is ignored (the usual style is used)", (j5["spikes"][0].get("template"), j5["options"]["template"]), (None, templates.default_id()))
+
     # ElevenLabs refusing stops the rest the same way, with its message
     def refuse(path, lang=""):
         raise eleven.ElevenError("ElevenLabs refused the key. Paste a working key on the AI page.")
@@ -177,6 +195,12 @@ r = c.post("/api/spikes/7777777777/clip", json={"times": [450]}, headers=H)
 check("ticked spikes are clipped from the page", (r.status_code, [x["t"] for x in r.json()["clips"]["spikes"]]), (200, [450]))
 jid = r.json()["job"]
 check("...and the new spike video really goes in the work line", put, [("job", jid, None)])
+from studio import templates   # noqa: E402
+with ctx.as_user(u):
+    pick_t = next(t for t in templates.all_templates()["builtin"] if t["id"] != templates.default_id())["id"]
+c.post("/api/spikes/7777777777/clip", json={"times": [200], "template": pick_t}, headers=H)
+check("the page sends the picked style with the ticked spikes", next(s_ for s_ in jobs._jobs[jid]["spikes"] if s_["t"] == 200).get("template"), pick_t)
+jobs._jobs[jid]["spikes"] = [s_ for s_ in jobs._jobs[jid]["spikes"] if s_["t"] != 200]
 c.post("/api/spikes/7777777777/clip", json={"times": [300]}, headers=H)
 check("ticking more while it waits doesn't put it in the line twice", (len(put), [s["t"] for s in jobs._jobs[jid]["spikes"]]), (1, [450, 300]))
 j7 = jobs._jobs[jid]
