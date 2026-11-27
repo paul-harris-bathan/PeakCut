@@ -11,6 +11,10 @@ A spike is a moment where chat runs much faster than this stream's own normal: t
 the surrounding minutes, so a huge streamer's busy chat and a small streamer's quiet one are judged the same way.
 Spikes at BIG times the normal or more are the ones worth clipping straight away; from MINOR up they are worth a look.
 
+Twitch mutes stretches of a VOD that play copyrighted music (usually in 3-minute blocks), and a clip from one has no
+sound at all. The scan asks Twitch which stretches are muted (asked again now and then: Twitch can mute later), and a
+spike whose clip would be mostly muted is marked so, and is not clipped.
+
 Each scan is kept as one JSON file per user and VOD; nothing is downloaded but chat timings (no text is kept)."""
 from __future__ import annotations
 
@@ -35,10 +39,15 @@ BIG, MINOR = 3.0, 2.5         # times the normal: clip straight away / worth a l
                               # streamer's busiest moments measured about 3x (CaseOh: ~6.6 messages a second, peaks ~13)
 MERGE = 30                    # seconds: spikes closer than this are one moment
 MAX_HOURS = 72
+CLIP_BEFORE, CLIP_AFTER = 25, 20  # seconds around a spike its clip covers (studio/spikeclip.py)
+MUTED_SHARE = 0.5             # a spike whose clip would be this much muted by Twitch or more is marked muted
+MUTED_FRESH = 6 * 3600        # seconds before the muted stretches are asked for again
+MUTED_RETRY = 600             # after Twitch didn't answer, seconds before asking again
 
 _VOD = re.compile(r"(?:twitch\.tv/(?:[\w-]+/)?videos?/|^)(\d{6,14})(?:[/?#]|$)")
 _Q_VIDEO = ("query($id:ID!){video(id:$id){id title lengthSeconds createdAt broadcastType "
             "owner{login displayName profileImageURL(width:70)}}}")
+_Q_MUTED = "query($id:ID!){video(id:$id){muteInfo{mutedSegmentConnection{nodes{duration offset}}}}}"
 _Q_CHAT = "query($id:ID!,$o:Int){video(id:$id){comments(contentOffsetSeconds:$o){edges{node{contentOffsetSeconds}}pageInfo{hasNextPage}}}}"
 _scans: dict = {}              # (user, vod) -> live progress of a scan that is running
 _lock = threading.Lock()
@@ -124,9 +133,37 @@ def sample(vid: str, length: int, progress=None, client=None, workers: int = WOR
     return out
 
 
-def find(rates: list, sensitivity: float = 1.0) -> list:
+def muted(vid: str, client=None) -> list:
+    """The stretches of a VOD Twitch muted (copyrighted music), as [start, end] seconds, joined where they touch."""
+    v = (_gql(client or _client(), _Q_MUTED, {"id": vid}) or {}).get("video") or {}
+    nodes = (((v.get("muteInfo") or {}).get("mutedSegmentConnection") or {}).get("nodes")) or []
+    out = []
+    for a, b in sorted((float(n.get("offset") or 0), float(n.get("offset") or 0) + float(n.get("duration") or 0)) for n in nodes):
+        if b <= a:
+            continue
+        if out and a <= out[-1][1] + 1:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return out
+
+
+def muted_share(ranges, a: float, b: float) -> float:
+    """How much of a..b (0 to 1) falls in muted stretches."""
+    if b <= a:
+        return 0.0
+    return sum(max(0.0, min(b, y) - max(a, x)) for x, y in ranges or []) / (b - a)
+
+
+def is_muted(ranges, t: float) -> bool:
+    """Whether the clip of a spike at `t` would be mostly without sound."""
+    return muted_share(ranges, t - CLIP_BEFORE, t + CLIP_AFTER) >= MUTED_SHARE
+
+
+def find(rates: list, sensitivity: float = 1.0, mute: list | None = None) -> list:
     """Spikes in a list of chat speeds (one per STEP seconds). `sensitivity` scales both levels: 2 = twice as picky.
-    Each spike: {"t": seconds into the VOD, "rate": messages a second, "times": how many times the normal, "level"}."""
+    Each spike: {"t": seconds into the VOD, "rate": messages a second, "times": how many times the normal, "level"},
+    and "muted": True when Twitch muted most of its clip (`mute`: the muted stretches)."""
     r = np.array([np.nan if x is None else float(x) for x in rates], dtype=float)
     if not len(r) or np.all(np.isnan(r)):
         return []
@@ -145,6 +182,8 @@ def find(rates: list, sensitivity: float = 1.0) -> list:
             continue
         found.append({"t": t, "rate": round(float(r[i]), 2), "times": round(float(times[i]), 1),
                       "level": "big" if times[i] >= big else "minor"})
+        if mute and is_muted(mute, t):
+            found[-1]["muted"] = True
     return sorted(found, key=lambda s: s["t"])
 
 
@@ -168,11 +207,42 @@ def get(vid: str, sensitivity: float = 1.0) -> dict | None:
     if not f.is_file():
         return dict(live) if live else None
     data = json.loads(f.read_text(encoding="utf-8"))
-    data["spikes"] = find(data.get("rates") or [], sensitivity)
+    _fresh_muted(vid, data)
+    data["spikes"] = find(data.get("rates") or [], sensitivity, data.get("muted"))
     data["sensitivity"] = sensitivity
     if live:
         data.update({k: live[k] for k in ("status", "progress", "error") if k in live})
     return data
+
+
+_muted_failed: dict = {}
+
+
+def _save(vid: str, data: dict):
+    tmp = _file(vid).with_suffix(".tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    tmp.replace(_file(vid))
+
+
+def _fresh_muted(vid: str, data: dict):
+    """Ask Twitch which stretches are muted if the scan never did (made before this) or did a while ago. Kept with the
+    scan. If Twitch doesn't answer, what was known is used, and it is asked again in a few minutes."""
+    now = time.time()
+    if now - float(data.get("muted_at") or 0) < MUTED_FRESH or now - _muted_failed.get(vid, 0) < MUTED_RETRY:
+        return
+    try:
+        data["muted"], data["muted_at"] = muted(vid), now
+    except Exception:  # noqa: BLE001 - the spikes still show, just without knowing what is muted
+        _muted_failed[vid] = now
+        return
+    keep = dict(data)
+    for k in ("spikes", "sensitivity", "status", "progress", "error"):
+        keep.pop(k, None)
+    keep["status"] = "done"
+    try:
+        _save(vid, keep)
+    except OSError:
+        pass
 
 
 def all_scans() -> list:
@@ -214,13 +284,12 @@ def start(url: str) -> dict:
                 if not any(x for x in rates if x):
                     raise ValueError("Twitch has no chat for that video.")
                 data = dict(info, rates=rates, step=STEP, scanned=time.time(), status="done")
-                tmp = _file(vid).with_suffix(".tmp")
-                tmp.write_text(json.dumps(data), encoding="utf-8")
-                tmp.replace(_file(vid))
+                _fresh_muted(vid, data)            # which stretches Twitch muted (saved with the scan just below)
+                _save(vid, data)
                 _scans.pop((u, vid), None)
                 try:                               # only if PEAKCUT_SPIKE_AUTO_MAX is set: big spikes clipped by themselves
                     from . import spikeclip
-                    spikeclip.auto(dict(data, spikes=find(rates)))
+                    spikeclip.auto(dict(data, spikes=find(rates, mute=data.get("muted"))))
                 except Exception:  # noqa: BLE001 - the scan is kept either way; spikes can still be clipped by hand
                     pass
             except Exception as e:  # noqa: BLE001

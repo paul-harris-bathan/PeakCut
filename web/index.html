@@ -2248,6 +2248,8 @@ textarea.cpg-in{height:auto;padding:8px 12px;resize:vertical}.cpg-in:focus{borde
 .spk-wrap svg{display:block;width:100%;height:220px;cursor:crosshair}
 .spk-b{fill:var(--brand);opacity:.85}.spk-b.minor{fill:var(--brand-deep);opacity:1}.spk-b.big{fill:var(--bad);opacity:1}
 .spk-m{stroke-width:1;vector-effect:non-scaling-stroke}.spk-m.big{stroke:var(--bad)}.spk-m.minor{stroke:var(--brand-line)}
+.spk-mute{fill:var(--dim);opacity:.16}.spk-st.mute{background:var(--brand-soft);color:var(--dim)}
+.spk-key{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);margin-top:6px}.spk-key i{display:inline-block;width:14px;height:10px;background:var(--dim);opacity:.3;border-radius:2px}
 .spk-cur{stroke:var(--brand-ink);stroke-width:1;vector-effect:non-scaling-stroke}
 .spk-tip{position:absolute;top:6px;transform:translateX(-50%);background:var(--brand-ink);color:#fff;font-size:12px;font-weight:600;padding:2px 8px;border-radius:var(--r-sm);pointer-events:none;white-space:nowrap}
 .spk-axis{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);margin-top:4px}
@@ -6395,22 +6397,28 @@ function spkGraph(d) {
     paths[lvl[i] || ""] += `M${x.toFixed(2)} ${(H - h).toFixed(1)}h${(bw - gap).toFixed(2)}V${H}h${(-(bw - gap)).toFixed(2)}Z`;
   });
   const lines = (d.spikes || []).map(s => `<line x1="${(s.t / (d.length || 1) * W).toFixed(1)}" x2="${(s.t / (d.length || 1) * W).toFixed(1)}" y1="0" y2="${H}" class="spk-m ${s.level}"/>`).join("");
-  const marks = `${lines}<path d="${paths[""]}" class="spk-b"/><path d="${paths.minor}" class="spk-b minor"/><path d="${paths.big}" class="spk-b big"/>`;
+  // stretches Twitch muted (copyrighted music): grey behind the bars; a clip from there has no sound
+  const mute = (d.muted || []).map(([a, b]) => `<rect x="${(a / (d.length || 1) * W).toFixed(1)}" width="${Math.max(1, (b - a) / (d.length || 1) * W).toFixed(1)}" y="0" height="${H}" class="spk-mute"/>`).join("");
+  const marks = `${mute}${lines}<path d="${paths[""]}" class="spk-b"/><path d="${paths.minor}" class="spk-b minor"/><path d="${paths.big}" class="spk-b big"/>`;
   const unit = SPK.unit === 1 ? "a second" : SPK.unit === 10 ? "per 10 s" : "a minute";
   return `<div class="spk-g"><div class="spk-gh"><b>Chat messages ${unit}</b><span class="seg">${[[1, "Per second"], [10, "Per 10 s"], [60, "Per minute"]].map(([k, l]) =>
       `<button type="button" data-act="spkunit" data-k="${k}" aria-pressed="${SPK.unit === k}">${l}</button>`).join("")}</span></div>
     <div class="spk-wrap"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" id="spksvg" role="img" aria-label="Chat speed across the video">${marks}
       <line id="spkcur" x1="0" x2="0" y1="0" y2="${H}" class="spk-cur" visibility="hidden"/></svg><div class="spk-tip" id="spktip" hidden></div></div>
-    <div class="spk-axis"><span>0:00:00</span><span>${hms((d.length || 0) / 2)}</span><span>${hms(d.length || 0)}</span></div></div>`;
+    <div class="spk-axis"><span>0:00:00</span><span>${hms((d.length || 0) / 2)}</span><span>${hms(d.length || 0)}</span></div>
+    ${(d.muted || []).length ? `<span class="spk-key"><i></i>Grey: Twitch muted the sound (copyrighted music). Spikes there aren't clipped.</span>` : ""}</div>`;
 }
 function spkState(d, t) {
   // what happened to the spike clip nearest this moment (spikes within 30 s are one clip)
   const s = ((d.clips || {}).spikes || []).find(x => Math.abs(x.t - t) < 30);
+  const mutedHere = (d.spikes || []).some(x => x.muted && Math.abs(x.t - t) < 30);
+  if (mutedHere && (!s || !s.clip || s.clip === "error" || s.clip === "muted"))
+    return {k: "mute", label: "Twitch muted", tip: "Twitch muted the sound here (copyrighted music), so a clip would have no sound.", retry: false};
   if (!s) return null;
   const going = ["queued", "running"].includes((d.clips || {}).status);
   if (!s.clip && !going) return null;           // its video was stopped before this spike was made: it can be picked again
   const st = {done: ["ok", "Clip made"], rendering: ["wait", "Making…"], queued: ["wait", "Waiting"], error: ["bad", "Couldn't be made"],
-              dropped: ["bad", "Left out"]}[s.clip || "queued"] || ["wait", "Making…"];
+              dropped: ["bad", "Left out"], muted: ["mute", "Twitch muted"]}[s.clip || "queued"] || ["wait", "Making…"];
   return {k: st[0], label: st[1], tip: s.error || "", retry: s.clip === "error" && !going};
 }
 function spkList(d) {

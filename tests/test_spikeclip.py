@@ -166,6 +166,7 @@ with ctx.as_user(u):
 import json   # noqa: E402
 
 from studio import spikes   # noqa: E402
+spikes.muted = lambda vid, client=None: []   # Twitch isn't asked which stretches are muted
 with ctx.as_user(u):
     (spikes._file("7777777777")).write_text(json.dumps(dict(scan, id="7777777777", rates=[1.0] * 60, step=10)), encoding="utf-8")
 check("clipping needs at least one spike", c.post("/api/spikes/7777777777/clip", json={"times": []}, headers=H).status_code, 400)

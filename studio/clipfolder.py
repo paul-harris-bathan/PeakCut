@@ -127,7 +127,7 @@ def _worth_a_look(job: dict) -> list:
     except Exception:  # noqa: BLE001 - no scan, nothing to list
         return []
     taken = [float(s.get("t", 0)) for s in job.get("spikes") or []]
-    return [s["t"] for s in (scan or {}).get("spikes") or [] if s.get("level") == "minor" and not any(abs(s["t"] - t) < 30 for t in taken)]
+    return [s["t"] for s in (scan or {}).get("spikes") or [] if s.get("level") == "minor" and not s.get("muted") and not any(abs(s["t"] - t) < 30 for t in taken)]
 
 
 def write_list(job: dict, where: Path) -> Path:

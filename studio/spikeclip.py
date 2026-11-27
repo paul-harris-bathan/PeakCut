@@ -9,19 +9,23 @@ words are proofread by the AI and drawn as captions, in the chosen style, on the
 Spike clips belong to one PeakCut video per VOD (kind "spikes"), so they show, play, post, download and can be made
 again like any other clips. Every spike, big or small, is clipped only when the person ticks it. With
 PEAKCUT_SPIKE_AUTO_MAX set above 0, that many big spikes are instead clipped by themselves when a scan finishes
-(biggest first)."""
+(biggest first).
+
+A spike in a stretch Twitch muted (copyrighted music) is not clipped: its clip would have no sound, and nothing to
+hear. It shows as "Twitch muted" instead."""
 from __future__ import annotations
 
 import re
 import time
 from pathlib import Path
 
-from . import ai, brain, config, creators, ctx, eleven, hashtags, jobs, media, safe, usage
+from . import ai, brain, config, creators, ctx, eleven, hashtags, jobs, media, safe, spikes, usage
 
 BEFORE = 25                  # seconds of video before the spike: people type in chat after the moment
 AFTER_MIN, AFTER_MAX = 15, 25  # the clip ends this long after the spike; the AI picks where, inside these
 HEAR_AFTER = 30              # seconds after the spike that ElevenLabs hears, so the AI can choose the end
 MERGE = 30                   # spikes closer than this are one clip
+MUTED = "Twitch muted the sound here (copyrighted music), so a clip would have no sound."
 AUTO_MAX = int(config.env("PEAKCUT_SPIKE_AUTO_MAX", "0"))   # big spikes clipped by themselves (0: none, every one is ticked)
 
 PROMPT = """You are a clip editor for short vertical videos (TikTok, Shorts, Reels) from a live stream.
@@ -86,15 +90,21 @@ def clip_spikes(scan: dict, times: list, why: str = "picked") -> dict:
                           enqueue=False, creator=creator_for(scan.get("login")), kind="spikes")
         job.update(vod=vid, spikes=[], title=scan.get("title") or "", uploader=scan.get("streamer") or "",
                    duration=float(scan.get("length") or 0), stage="Waiting")
+    if scan.get("muted") is not None:
+        job["muted"] = scan["muted"]                  # Twitch's muted stretches, checked again before each spike is made
     known = {round(float(s["t"])): s for s in (scan.get("spikes") or [])}
     for t in sorted({max(0, int(x)) for x in times}):
         same = next((s for s in job["spikes"] if abs(t - s["t"]) < MERGE), None)
         if same:
-            if same.get("clip") == "error":           # picked again after it failed: tried again
+            if same.get("clip") == "muted" and not spikes.is_muted(job.get("muted"), same["t"]):
+                same.update(clip=None, error=None)    # Twitch gave the sound back since
+            elif same.get("clip") == "error":           # picked again after it failed: tried again
                 same.update(clip=None, error=None)
             continue
         k = known.get(t, {})
         job["spikes"].append({"t": t, "times": k.get("times"), "level": k.get("level", "minor"), "why": why})
+        if k.get("muted") or spikes.is_muted(job.get("muted"), t):
+            job["spikes"][-1].update(clip="muted", error=MUTED)
     # Spikes still to make start being made unless the video is already in the line or being made (run() picks up
     # spikes added while it works). A video that was stopped or finished goes back in the line.
     pending = any(not s.get("clip") for s in job["spikes"])
@@ -102,6 +112,8 @@ def clip_spikes(scan: dict, times: list, why: str = "picked") -> dict:
         job.update(status="queued", error=None, stage="Waiting", progress=0.0)
         jobs.enqueue(job)
     else:
+        if fresh:     # nothing to make (every spike Twitch muted): not left "queued", or later ticks would think it in line
+            job.update(status="done", stage="Nothing made: Twitch muted the sound there", progress=1.0)
         jobs.save(job)
     ctx.bump()
     return job
@@ -199,6 +211,10 @@ def run(job):
         n = max([int(c["id"][4:]) for c in job["clips"] if re.fullmatch(r"clip\d+", c.get("id", ""))] + [0]) + 1
         jobs._set(job, stage=f"Spike {i + 1} of {total} at {_hms(spike['t'])}", progress=round(0.05 + 0.9 * i / max(1, total), 3))
         i += 1
+        if spikes.is_muted(job.get("muted"), spike["t"]):      # no sound to clip (picked before it was known)
+            spike.update(clip="muted", error=MUTED)
+            jobs.save(job)
+            continue
         try:
             clip = _prepare(job, spike, n)
         except (eleven.ElevenError, media.YouTubeBlocked) as e:
@@ -223,7 +239,9 @@ def run(job):
         made += clip.get("status") == "done"
     clips = [c for c in job["clips"] if c.get("status") != "dropped"]
     failed = [s for s in job.get("spikes") or [] if s.get("clip") == "error"]
-    stage = f"Done: {len(clips)} spike clip{'s' if len(clips) != 1 else ''}" + (f", {len(failed)} couldn't be made" if failed else "")
+    muted = sum(1 for s in job.get("spikes") or [] if s.get("clip") == "muted")
+    stage = (f"Done: {len(clips)} spike clip{'s' if len(clips) != 1 else ''}" + (f", {len(failed)} couldn't be made" if failed else "")
+             + (f", {muted} skipped (Twitch muted)" if muted else ""))
     jobs._set(job, status="done", stage=stage, progress=1.0, took=round(time.time() - t0),
               error=(failed[0].get("error") if failed and not made else None), _final=True)
     try:
@@ -248,7 +266,7 @@ def summary(vid: str) -> dict | None:
     by_id = {c["id"]: c for c in j["clips"]}
     return {"job": j["id"], "status": j.get("status"), "stage": j.get("stage"), "creator": j.get("creator"),
             "spikes": [{"t": s["t"], "why": s.get("why"), "error": s.get("error") or "",
-                        "clip": (by_id.get(s.get("clip")) or {}).get("status") if s.get("clip") not in (None, "error") else s.get("clip")}
+                        "clip": (by_id.get(s.get("clip")) or {}).get("status") if s.get("clip") not in (None, "error", "muted") else s.get("clip")}
                        for s in j.get("spikes") or []]}
 
 

@@ -98,6 +98,7 @@ check("the folder name option is cleaned like a file name", jobs.clean_options({
 j4 = fake_job("Spike VOD", creator=cr["id"])
 j4.update(vod="2940013635", spikes=[{"t": 5010, "clip": "clip01"}])
 from studio import spikes   # noqa: E402
+spikes.muted = lambda vid, client=None: []   # Twitch isn't asked which stretches are muted
 import json   # noqa: E402
 with ctx.as_user(u):
     spikes._file("2940013635").write_text(json.dumps({"id": "2940013635", "length": 6000, "step": 10,
