@@ -137,10 +137,13 @@ class Gate:
                 if path == "/api/upload" or piece else 256 * 1024
             if method == "POST" and path.endswith("/logo") and path.startswith(("/api/my-campaigns/", "/api/creators/")):
                 cap = 26 * 1024 * 1024          # a campaign's logo: a picture, a GIF or a short video (MAX_LOGO_MB)
+            if method == "POST" and path == "/api/overlays":
+                cap = 16 * 1024 * 1024          # a picture for Add image (overlays.MAX_MB, plus the form around it)
             try:
                 if int(req.headers.get("content-length") or 0) > cap:
                     return await deny(413, f"That file is too big. The limit is {config.MAX_UPLOAD_MB} MB." if path == "/api/upload"
-                                      else "That logo is too big. The limit is 25 MB." if path.endswith("/logo") else "That request is too large.")
+                                      else "That logo is too big. The limit is 25 MB." if path.endswith("/logo")
+                                      else "That picture is too big. The limit is 15 MB." if path == "/api/overlays" else "That request is too large.")
             except ValueError:
                 return await deny(400, "Bad request.")
             seen, inner_receive = 0, receive

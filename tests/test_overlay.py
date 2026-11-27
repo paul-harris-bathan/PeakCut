@@ -38,6 +38,12 @@ check("...the same picture again is kept once", c.post("/api/overlays", files={"
 check("something that isn't a picture is refused", c.post("/api/overlays", files={"file": ("fake.png", b"not a picture", "image/png")}, headers=H).status_code, 400)
 check("other file types are refused", c.post("/api/overlays", files={"file": ("run.exe", b"MZ", "application/octet-stream")}, headers=H).status_code, 400)
 check("uploading from another website is refused", c.post("/api/overlays", files={"file": ("a.png", red.read_bytes(), "image/png")}, headers={"Origin": "https://evil.example"}).status_code, 403)
+noisy = d / "big.png"            # a real picture of several MB (random pixels don't squeeze), far over the 256 KB of a form
+Image.frombytes("RGB", (1200, 1000), os.urandom(1200 * 1000 * 3)).save(noisy)
+r = c.post("/api/overlays", files={"file": ("big.png", noisy.read_bytes(), "image/png")}, headers=H)
+check(f"a big picture ({noisy.stat().st_size / 1e6:.1f} MB) is taken", (r.status_code, r.json().get("width")), (200, 1200))
+r = c.post("/api/overlays", files={"file": ("huge.png", b"\0" * (16 * 1024 * 1024), "image/png")}, headers=H)
+check("over 15 MB is refused with the limit", (r.status_code, "15 MB" in r.json().get("detail", "")), (413, True))
 gif = d / "blink.gif"
 frames = [Image.new("RGB", (120, 120), col) for col in ((0, 0, 255), (0, 255, 0))]
 frames[0].save(gif, save_all=True, append_images=frames[1:], duration=200, loop=0)
