@@ -5878,7 +5878,7 @@ function camCard(c) {
   const box = b ? `<div class="camf-box" style="left:${pct(b.x)}%;top:${pct(b.y)}%;width:${pct(b.w)}%;height:${pct(b.h)}%"><b>Cam</b>${RS}</div>` : "";
   return `<input type="hidden" data-k="cam" data-json="1" value="${esc(JSON.stringify(b || null))}">
     <div class="camf"><div class="camf-pic"><img src="/api/creators/${encodeURIComponent(c.id)}/cam-frame.jpg?v=${S.camV || 0}" alt="" onerror="this.closest('.camf').classList.add('none')"><span class="camf-empty">${ic("video")}Clip a video or a live stream of ${esc(c.name)} first</span>${box}</div>
-      <div class="camf-side"><p class="tpe-note">${b ? `${c.cam_auto ? "Found by PeakCut. " : ""}Drag the box onto their camera, pull its corner to fit it.` : c.cam_none ? "No separate camera was found in their stream." : "Found by itself on the first clip made with a style that has a streamer cam."}</p>
+      <div class="camf-side"><p class="tpe-note">${b ? `${c.cam_auto ? "Found by PeakCut. " : ""}Drag the box onto their camera (or VTuber character), pull its corner to fit it. Every clip of theirs uses this box, the Gameplay layout too.` : c.cam_none ? "No cam: their clips never show one." : "Found by itself on the first clip made with a style that has a streamer cam. For a VTuber, set it by hand: a drawn character isn't always found."}</p>
         <div class="tpe-cam"><button type="button" class="btn sm" data-act="camfind">${ic("search")}${b ? "Find it again" : "Find it now"}</button>
         ${b ? `<button type="button" class="btn sm ghost" data-act="camnone">No cam</button>` : `<button type="button" class="btn sm ghost" data-act="camset">Set it by hand</button>`}</div></div></div>`;
 }

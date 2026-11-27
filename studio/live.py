@@ -241,7 +241,14 @@ class Session:
         One frame goes to the AI as well, and whatever it says is measured again on the
         picture. A stream where the webcam is a square picture along the right edge, or
         one where there is no webcam at all and the game has panels of its own, is told
-        apart from a real camera by what moves: a person sits still, the game does not."""
+        apart from a real camera by what moves: a person sits still, the game does not.
+        The streamer's own box (their page, Setup, Streamer cam) comes first, and "No cam" means none is looked for."""
+        mine = jobs.streamer_cam(self.job.get("creator"), src)
+        if mine is False:
+            return None
+        if mine:
+            self.job["facecam"] = mine
+            return mine
         try:
             box = facecam.detect(src, ask=brain.look_for_facecam)
         except Exception:  # noqa: BLE001 - a missing facecam is not a failure

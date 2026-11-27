@@ -1267,14 +1267,48 @@ def _covers(words: list, start: float, end: float) -> bool:
     return len(inside) >= 25 * minutes and inside[-1]["s"] >= start + 0.85 * (end - start)
 
 
+def streamer_cam(creator_id, path=None, size=None):
+    """The streamer's own cam box (their page, Setup, Streamer cam: placed by hand or found and kept there) in this
+    video's pixels, as [x, y, w, h]. False when it is set to "No cam"; None when the streamer has none set. It wins
+    over looking for one, which on a VTuber (a drawn character, not a face) can pick the chat instead."""
+    c = creators.get(creator_id) if creator_id else None
+    if not c:
+        return None
+    if c.get("cam_none"):
+        return False
+    b = c.get("cam")
+    if not (isinstance(b, dict) and b.get("w") and b.get("h")):
+        return None
+    w, h = size or (0, 0)
+    if not (w and h) and path and Path(path).is_file():
+        try:                             # only the picture's size is needed (a piece of stream may have no sound)
+            st = (json.loads(media.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                                        "-of", "json", str(path)], timeout=30)).get("streams") or [{}])[0]
+            w, h = int(st.get("width") or 0), int(st.get("height") or 0)
+        except Exception:  # noqa: BLE001 - no size, no box
+            return None
+    if not (w and h):
+        return None
+    x, y = max(0.0, float(b.get("x", 0))), max(0.0, float(b.get("y", 0)))
+    bw, bh = min(1.0 - x, float(b["w"])), min(1.0 - y, float(b["h"]))
+    box = [int(round(x * w)), int(round(y * h)), int(round(bw * w)), int(round(bh * h))]
+    return box if box[2] >= 16 and box[3] >= 16 else None
+
+
 def _facecam(job) -> list | None:
     """Where the webcam is in the source: once for the whole video, for every clip of it.
 
-    Only a sure answer is used. A box that is a scoreboard drawn over the game would
-    put a picture of a scoreboard in the corner of the clip. One frame is also shown to
-    the AI, which tells a person from a game character better than any measurement can;
-    what it says is measured again on the picture, so it cannot do any harm."""
+    The streamer's own box comes first (streamer_cam). Otherwise only a sure answer is used. A box that is a
+    scoreboard drawn over the game would put a picture of a scoreboard in the corner of the clip. One frame is also
+    shown to the AI, which tells a person from a game character better than any measurement can; what it says is
+    measured again on the picture, so it cannot do any harm."""
     path = job.get("source_path")
+    mine = streamer_cam(job.get("creator"), path, (job.get("width"), job.get("height")))
+    if mine is False:                    # the streamer has no cam: the game fills the screen
+        return None
+    if mine:
+        job["facecam"] = mine
+        return mine
     if not path or not Path(path).is_file():
         return None
     try:
