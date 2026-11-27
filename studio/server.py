@@ -1416,6 +1416,34 @@ def _clip_or_404(jid: str, cid: str):
     return job, clip
 
 
+# ---- On-screen text: correct a clip's heading and captions by hand, then it is made again with them
+@app.get("/api/jobs/{jid}/clips/{cid}/screen")
+def clip_screen(jid: str, cid: str):
+    job, clip = _clip_or_404(jid, cid)
+    return {"hook": clip.get("hook") or "", "lines": jobs.caption_lines(job, clip), "length": round(clip["end"] - clip["start"], 2),
+            "edited": bool(clip.get("own_words")), "captions": clip.get("captions", True) is not False}
+
+
+@app.put("/api/jobs/{jid}/clips/{cid}/screen")
+def clip_screen_save(jid: str, cid: str, body: dict = Body(...)):
+    job, clip = _clip_or_404(jid, cid)
+    if job["status"] in ("queued", "running") or clip.get("status") in ("queued", "rendering"):
+        raise HTTPException(409, "This clip is still being made. Try again when it has finished.")
+    lines = body.get("lines")
+    if lines is not None and not isinstance(lines, list):
+        raise HTTPException(400, "The captions must be a list of lines.")
+    hook = body.get("hook")
+    if hook is None and lines is None:
+        raise HTTPException(400, "Nothing to change.")
+    _throttle("render:" + ctx.uid(), 20, 600, "That's a lot of re-makes in a short time. Wait a few minutes.")
+    try:
+        jobs.set_text(jid, cid, hook, lines)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e))
+    ctx.bump()
+    return jobs.public(job)
+
+
 @app.put("/api/jobs/{jid}/clips/{cid}/text")
 def clip_text(jid: str, cid: str, body: dict = Body(...)):
     """Save a clip's title, description and hashtags. The video is not made again."""

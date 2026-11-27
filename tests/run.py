@@ -116,6 +116,7 @@ def main() -> int:
                 ("updating from an older PeakCut: everything is still there", ["tests/test_upgrade.py"]),
                 ("downloads in Desktop\\PeakCut Clips: names, clips.txt, renaming", ["tests/test_clipfolder.py"]),
                 ("quick edit: a picture on chosen clips, where and how big, next to the logo", ["tests/test_overlay.py"]),
+                ("on-screen text: heading and captions corrected by hand, shown exactly", ["tests/test_screen_text.py"]),
                 ("the app icon and the updated message", ["tests/test_app_icon.py"]),
                 ("no working AI key, no clipping", ["tests/test_need_key.py"])]
         for name, args in runs:
