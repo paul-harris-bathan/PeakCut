@@ -31,7 +31,8 @@ WORKERS = 3                   # samples asked for at once: at 4 or more Twitch s
 RETRIES = 4                   # an empty answer is Twitch holding back: wait a little longer each time and ask again
 NORMAL_WINDOW = 600           # seconds around a moment whose median chat speed is "normal" there
 MIN_NORMAL = 0.2              # messages a second: a near-silent stretch can't make every message a spike
-BIG, MINOR = 5.0, 2.5         # times the normal: clip straight away / worth a look (the slider moves both)
+BIG, MINOR = 3.0, 2.5         # times the normal: clip straight away / worth a look (the slider moves both). A big
+                              # streamer's busiest moments measured about 3x (CaseOh: ~6.6 messages a second, peaks ~13)
 MERGE = 30                    # seconds: spikes closer than this are one moment
 MAX_HOURS = 72
 

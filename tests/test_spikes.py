@@ -37,12 +37,13 @@ check("no messages: no chat", spikes._rate([], 100, False), 0.0)
 normal = [2.0] * 600                      # 100 minutes of 2 messages a second
 r = list(normal)
 r[200] = 12.0                             # 6x: big
-r[400] = 6.0                              # 3x: worth a look
+r[400] = 5.5                              # 2.75x: worth a look (big starts at 3x)
 r[402] = 5.0                              # 20 s later: the same moment
 r[500] = None                             # a sample Twitch didn't answer
 found = spikes.find(r)
 check("a big spike and one worth a look are found", [(s["t"], s["level"]) for s in found], [(2000, "big"), (4000, "minor")])
-check("...each says how many times the normal it is", [s["times"] for s in found], [6.0, 3.0])
+check("...each says how many times the normal it is", [s["times"] for s in found], [6.0, 2.8])
+check("3x the normal is big", spikes.find([2.0] * 300 + [6.0] + [2.0] * 300)[0]["level"], "big")
 check("a gap never becomes a spike", all(s["t"] != 5000 for s in found))
 check("pickier: the small one drops out", [s["t"] for s in spikes.find(r, 1.5)], [2000])
 check("looser: the big one stays big, more are found", [s["level"] for s in spikes.find(r, 0.5)][:1], ["big"])
