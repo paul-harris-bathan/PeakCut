@@ -2246,7 +2246,7 @@ textarea.cpg-in{height:auto;padding:8px 12px;resize:vertical}.cpg-in:focus{borde
 .spk-g{margin-top:16px}.spk-gh{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}
 .spk-wrap{position:relative;border:1px solid var(--brand-line);border-radius:var(--r-sm);background:#fff;padding:6px 0}
 .spk-wrap svg{display:block;width:100%;height:220px;cursor:crosshair}
-.spk-l{fill:none;stroke:var(--brand);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.spk-b{fill:var(--brand);opacity:.85}.spk-b.minor{fill:var(--brand-deep);opacity:1}.spk-b.big{fill:var(--bad);opacity:1}
 .spk-m{stroke-width:1;vector-effect:non-scaling-stroke}.spk-m.big{stroke:var(--bad)}.spk-m.minor{stroke:var(--brand-line)}
 .spk-cur{stroke:var(--brand-ink);stroke-width:1;vector-effect:non-scaling-stroke}
 .spk-tip{position:absolute;top:6px;transform:translateX(-50%);background:var(--brand-ink);color:#fff;font-size:12px;font-weight:600;padding:2px 8px;border-radius:var(--r-sm);pointer-events:none;white-space:nowrap}
@@ -6347,15 +6347,23 @@ function spkPoints(d) {
   return {pts: r.map(x => x == null ? null : x * (SPK.unit === 1 ? 1 : step)), step};
 }
 function spkGraph(d) {
-  const W = 1000, H = 220, {pts, step} = spkPoints(d), max = Math.max(1, ...pts.filter(x => x != null)), n = Math.max(1, pts.length - 1);
-  const X = i => (i / n * W).toFixed(1), Y = v => (H - 8 - v / max * (H - 24)).toFixed(1);
-  let line = "", up = false;
-  pts.forEach((v, i) => { if (v == null) { up = false; return; } line += `${up ? "L" : "M"}${X(i)} ${Y(v)} `; up = true; });
-  const marks = (d.spikes || []).map(s => `<line x1="${(s.t / (d.length || 1) * W).toFixed(1)}" x2="${(s.t / (d.length || 1) * W).toFixed(1)}" y1="0" y2="${H}" class="spk-m ${s.level}"/>`).join("");
+  const W = 1000, H = 220, {pts, step} = spkPoints(d), max = Math.max(1, ...pts.filter(x => x != null));
+  // one bar per point; a bar at a spike is coloured (red: big, darker orange: worth a look). Thin bars touch, wide ones get a gap.
+  const bw = W / Math.max(1, pts.length), gap = bw > 3 ? bw * 0.18 : 0;
+  const lvl = {};
+  (d.spikes || []).forEach(s => { lvl[Math.round(s.t / step)] = s.level; });
+  const paths = {"": "", minor: "", big: ""};
+  pts.forEach((v, i) => {
+    if (v == null || v <= 0) return;
+    const h = Math.max(1, v / max * (H - 16)), x = i * bw + gap / 2;
+    paths[lvl[i] || ""] += `M${x.toFixed(2)} ${(H - h).toFixed(1)}h${(bw - gap).toFixed(2)}V${H}h${(-(bw - gap)).toFixed(2)}Z`;
+  });
+  const lines = (d.spikes || []).map(s => `<line x1="${(s.t / (d.length || 1) * W).toFixed(1)}" x2="${(s.t / (d.length || 1) * W).toFixed(1)}" y1="0" y2="${H}" class="spk-m ${s.level}"/>`).join("");
+  const marks = `${lines}<path d="${paths[""]}" class="spk-b"/><path d="${paths.minor}" class="spk-b minor"/><path d="${paths.big}" class="spk-b big"/>`;
   const unit = SPK.unit === 1 ? "a second" : SPK.unit === 10 ? "per 10 s" : "a minute";
   return `<div class="spk-g"><div class="spk-gh"><b>Chat messages ${unit}</b><span class="seg">${[[1, "Per second"], [10, "Per 10 s"], [60, "Per minute"]].map(([k, l]) =>
       `<button type="button" data-act="spkunit" data-k="${k}" aria-pressed="${SPK.unit === k}">${l}</button>`).join("")}</span></div>
-    <div class="spk-wrap"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" id="spksvg" role="img" aria-label="Chat speed across the video">${marks}<path d="${line}" class="spk-l"/>
+    <div class="spk-wrap"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" id="spksvg" role="img" aria-label="Chat speed across the video">${marks}
       <line id="spkcur" x1="0" x2="0" y1="0" y2="${H}" class="spk-cur" visibility="hidden"/></svg><div class="spk-tip" id="spktip" hidden></div></div>
     <div class="spk-axis"><span>0:00:00</span><span>${hms((d.length || 0) / 2)}</span><span>${hms(d.length || 0)}</span></div></div>`;
 }
