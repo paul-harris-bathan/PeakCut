@@ -617,17 +617,23 @@ LOGO_AT = {"tl": "44:56", "tc": "(W-w)/2:56", "tr": "W-w-44:56", "bl": "44:H-h-3
 LOGO_STILL, LOGO_MOVING = (".png", ".jpg", ".jpeg", ".webp"), (".gif", ".mp4", ".mov", ".webm")
 
 
-def _logo(logo, n):
+# A picture put on chosen clips (Quick edit, Add image): bigger and squarer boxes than a logo's, and it can sit in the middle
+IMAGE_BOX = {"s": (280, 280), "m": (440, 440), "l": (640, 640)}
+IMAGE_AT = {**LOGO_AT, "mc": "(W-w)/2:(H-h)/2"}
+
+
+def _logo(logo, n, label="lg", boxes=None, spots=None):
     """ffmpeg inputs and the filter that scales this logo for input n. A full-frame one (a 1080x1920 template with the
     logo already in place) covers the whole clip; any other sits in a corner, clear of the heading and the captions."""
+    boxes, spots = boxes or LOGO_BOX, spots or LOGO_AT
     path = Path(logo["path"])
     ext = path.suffix.lower()
     args = ["-ignore_loop", "0"] if ext == ".gif" else ["-stream_loop", "-1"] if ext in LOGO_MOVING else ["-loop", "1"]
     if logo.get("pos") == "full":
-        return args + ["-i", str(path)], f"[{n}:v]scale={W}:{H},format=rgba[lg]", "0:0"
-    bw, bh = LOGO_BOX.get(logo.get("size"), LOGO_BOX["m"])
-    return (args + ["-i", str(path)], f"[{n}:v]scale=w={bw}:h={bh}:force_original_aspect_ratio=decrease,format=rgba[lg]",
-            LOGO_AT.get(logo.get("pos"), LOGO_AT["tl"]))
+        return args + ["-i", str(path)], f"[{n}:v]scale={W}:{H},format=rgba[{label}]", "0:0"
+    bw, bh = boxes.get(logo.get("size"), boxes["m"])
+    return (args + ["-i", str(path)], f"[{n}:v]scale=w={bw}:h={bh}:force_original_aspect_ratio=decrease,format=rgba[{label}]",
+            spots.get(logo.get("pos"), spots["tl"]))
 
 
 RENDER_SECONDS = 600      # one clip's video encode; far beyond normal, so a frozen encoder is stopped, not waited on
@@ -714,6 +720,20 @@ def _render_in(work: Path, src: Path, out_dir: Path, name: str, start, end, layo
         more += args
         fc += f";{scale};[{last}][lg]overlay={at}:shortest=1[vl]"
         last, n = "vl", n + 1
+    for i, img in enumerate(extras.get("images") or []):        # pictures put on this clip by hand, over any logo
+        if not Path(img.get("path", "")).is_file():
+            continue
+        if "w" in img:      # placed by hand: this wide (a share of the frame), centred where it was dropped
+            ext = Path(img["path"]).suffix.lower()
+            args = (["-ignore_loop", "0"] if ext == ".gif" else ["-stream_loop", "-1"] if ext in LOGO_MOVING else ["-loop", "1"]) + ["-i", img["path"]]
+            pw = max(2, int(round(W * float(img["w"]) / 2)) * 2)
+            scale = f"[{n}:v]scale={pw}:-2,format=rgba[im{i}]"
+            at = f"{int(round(W * float(img['x'])))}-w/2:{int(round(H * float(img['y'])))}-h/2"
+        else:
+            args, scale, at = _logo(img, n, f"im{i}", IMAGE_BOX, IMAGE_AT)
+        more += args
+        fc += f";{scale};[{last}][im{i}]overlay={at}:shortest=1[vi{i}]"
+        last, n = f"vi{i}", n + 1
     for i, e in enumerate(info["emoji"]):
         png = work / f"{name}.e{i}.png"
         if emoji_png(e["ch"], png, e["size"]):

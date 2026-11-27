@@ -560,6 +560,12 @@ def request_render(jid, cid, changes: dict):
         new["template"] = ""
     if "hashtags" in changes:
         new["hashtags"] = _tags(changes["hashtags"])
+    if "image" in changes:                           # Quick edit: a picture on the clip, or none
+        from . import overlays
+        if changes["image"]:
+            new["image"] = overlays.clean(changes["image"])
+        else:
+            new.pop("image", None)
     if new.get("style") not in render.STYLES:
         new["style"] = DEFAULTS["style"]
     if new.get("layout") not in render.LAYOUTS:
@@ -567,6 +573,8 @@ def request_render(jid, cid, changes: dict):
     new.pop("draft", None)
     clip.update(new, status="queued")
     clip.pop("draft", None)
+    if "image" in changes and not changes["image"]:
+        clip.pop("image", None)
     save(job)
     _q.put(("clip", jid, cid))
 
@@ -844,6 +852,10 @@ def render_one(job, clip, words):
             box = clip["look"].get("cam_src") or _cam_box(job, who, src)          # drawn on the style, else found
             if box:
                 extras = {**(extras or {}), "cam": box}
+        from . import overlays
+        pics = overlays.for_render(clip, job.get("user")) if clip.get("image") else []   # a picture put on by hand (Quick edit)
+        if pics:
+            extras = {**(extras or {}), "images": pics}
         need, got_h = int((job.get("options") or {}).get("quality") or 1080), int(job.get("height") or 0)
         clip["soft"] = bool(got_h and need > 1080 and got_h < need / 2)     # e.g. a 720p video with a zoomed-in cam
         out = render.render_clip(src, d / "clips", clip["id"], local, near, job["width"], job["height"], extras=extras)
