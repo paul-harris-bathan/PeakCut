@@ -2285,7 +2285,7 @@ def spike_clip(vid: str, body: dict = Body(...)):
     if not times:
         raise HTTPException(400, "Pick at least one spike.")
     try:
-        job = spikeclip.clip_spikes(scan, times)
+        job = spikeclip.clip_spikes(scan, times, template=str(body.get("template") or "")[:12] or None)
     except spikeclip.NotReady as e:
         raise HTTPException(409, str(e))
     return {"job": job["id"], "clips": spikeclip.summary(vid)}

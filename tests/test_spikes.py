@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient   # noqa: E402
 from studio import db as database, server, spikes   # noqa: E402
 
 database.init()
+spikes.muted = lambda vid, client=None: []   # Twitch isn't asked which stretches are muted
 fails = []
 
 
