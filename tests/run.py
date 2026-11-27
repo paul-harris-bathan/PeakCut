@@ -97,6 +97,7 @@ def main() -> int:
                 ("channel links and auto-record back-off", ["tests/test_channel_links.py"]),
                 ("live always gives a clip, hand clips always titled", ["tests/test_live_floor.py"]),
                 ("live now: find a streamer, clip 24/7", ["tests/test_discover.py"]),
+                ("a streamer's recent Twitch VODs on their page", ["tests/test_vods.py"]),
                 ("clip anyway when nothing was found", ["tests/test_clip_anyway.py"]),
                 ("yt-dlp errors in plain words", ["tests/test_friendly_errors.py"]),
                 ("live clips keep their footage while waiting", ["tests/test_live_buffer.py"]),

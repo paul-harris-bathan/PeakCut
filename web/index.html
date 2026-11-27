@@ -2232,6 +2232,14 @@ textarea.cpg-in{height:auto;padding:8px 12px;resize:vertical}.cpg-in:focus{borde
 .hq-note{display:flex;align-items:center;gap:7px;margin:8px 4px 0;font-size:12.5px;color:var(--dim)}
 .hq-note[hidden]{display:none}.hq-note svg{width:14px;height:14px;color:var(--brand-deep);flex:none}
 .hq-note.bad{color:var(--bad)}.hq-note.bad svg{color:var(--bad)}
+.vods{margin:12px 0;border:1px solid var(--brand-line);border-radius:var(--r-sm);padding:10px 12px;background:#fff}
+.vods summary{cursor:pointer;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.vod-list{display:grid;gap:10px;margin-top:10px}.vod{display:flex;align-items:center;gap:12px;min-width:0}
+.vod-pic{position:relative;flex:none;width:112px;height:63px;border-radius:var(--r-sm);overflow:hidden;background:var(--brand-soft);display:grid;place-items:center}
+.vod-pic img{width:100%;height:100%;object-fit:cover}.vod-pic .du{position:absolute;right:4px;bottom:4px;font-size:11px;background:rgba(0,0,0,.7);color:#fff;padding:0 4px;border-radius:3px}
+.vod-t{flex:1;min-width:0;display:grid}.vod-t b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vod-a{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+@media (max-width:640px){.vod{flex-wrap:wrap}.vod-a{width:100%;justify-content:flex-start}}
 .spk-add{gap:8px;margin-top:12px}.spk-add input{flex:1;min-width:0}
 .spk-title{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
 .spk-prog{height:8px;border-radius:99px;background:var(--brand-soft);overflow:hidden;margin:12px 0 6px}.spk-prog i{display:block;height:100%;background:var(--brand)}
@@ -3577,13 +3585,34 @@ function go(v, tab, fromHistory) {
   $("#main").scrollTo(0, 0); render();
   if (v === "overview") loadOverview();
 }
+// ---- a streamer's recent Twitch VODs: clip one the usual way, or find where its chat spiked
+async function drawVods(force) {
+  const cid = creatorId(), box = $("#vods"); if (!box || !cid) return;
+  S.vods ||= {};
+  let got = S.vods[cid];
+  if (!got || force || Date.now() - got.at > 300000) {
+    try { got = S.vods[cid] = {at: Date.now(), ...(await api(`/api/creators/${encodeURIComponent(cid)}/vods`))}; }
+    catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
+  }
+  if (creatorId() !== cid || !$("#vods")) return;
+  if (!got.login) { box.innerHTML = ""; return; }
+  const done = id => S.jobs.some(j => j.creator === cid && String(j.source?.url || "").includes(`/videos/${id}`));
+  const day = s => { try { return new Date(s).toLocaleDateString(undefined, {weekday: "short", day: "numeric", month: "short"}); } catch { return ""; } };
+  box.innerHTML = `<details class="vods" ${S.vodsOpen === false ? "" : "open"}><summary><b>Recent Twitch VODs</b><span class="sub">${got.vods.length} · Twitch keeps them 7 to 60 days</span></summary>
+    ${got.vods.length ? `<div class="vod-list">${got.vods.map(v => `<div class="vod">
+      <span class="vod-pic">${v.pic ? `<img src="${esc(v.pic)}" alt="" loading="lazy">` : ic("film")}<span class="du">${fmt(v.length)}</span></span>
+      <div class="vod-t"><b title="${esc(v.title)}">${esc(v.title || "Untitled stream")}</b><span class="sub">${esc(day(v.created))}${done(v.id) ? " · clipped" : ""}</span></div>
+      <div class="vod-a"><button class="btn sm" data-act="vodclip" data-k="${esc(v.url)}">${ic("scissors")}Clip this</button><button class="btn sm ghost" data-act="vodspikes" data-k="${esc(v.url)}">${ic("chat")}Find spikes</button></div></div>`).join("")}</div>`
+      : `<p class="sub">No past broadcasts on Twitch right now.</p>`}</details>`;
+  box.querySelector("details").ontoggle = e => { S.vodsOpen = e.target.open; };
+}
 function setTab(t) {
   S.ctab = t;
   if (S.view.startsWith("c:")) remember(S.view, t, "replace");
   drawShell();
-  $("#cbody").innerHTML = t === "clips" ? `<div id="campbar"></div><div id="live"></div><div id="add"></div><div id="jobs"></div>` : t === "setup" || t === "campaign" ? `<div id="cform"></div>` : `<div id="clog"></div>`;
+  $("#cbody").innerHTML = t === "clips" ? `<div id="campbar"></div><div id="live"></div><div id="add"></div><div id="vods"></div><div id="jobs"></div>` : t === "setup" || t === "campaign" ? `<div id="cform"></div>` : `<div id="clog"></div>`;
   if ($("#stream")) $("#stream").style.display = t === "clips" ? "" : "none";
-  if (t === "clips") { drawAdd("compact"); drawCampBar(); }
+  if (t === "clips") { drawAdd("compact"); drawCampBar(); drawVods(); }
   if (t === "setup" || t === "campaign") drawCreatorForm();
   render();
 }
@@ -6397,6 +6426,18 @@ document.addEventListener("click", async e => {
   const a = b.dataset.act, d = b.dataset;
   if (b.tagName === "A") e.preventDefault();
   try {
+    if (a === "vodclip") {                         // a streamer's recent Twitch VOD: clip it the usual way
+      const cid = creatorId(); b.disabled = true;
+      try { await send("/api/jobs", {url: d.k, creator: cid}); toast("Clipping this VOD. It shows below as it goes.", "ok"); await tick(); drawVods(); }
+      catch (err) { toast(err.message, "bad"); } finally { b.disabled = false; }
+      return;
+    }
+    if (a === "vodspikes") {                       // ...or find where its chat spiked
+      b.disabled = true;
+      try { const got = await send("/api/spikes", {url: d.k}); SPK.vid = got.id; SPK.data = got; go("spikes"); }
+      catch (err) { toast(err.message, "bad"); } finally { b.disabled = false; }
+      return;
+    }
     if (a === "go") { closePops();
       if (S.tplEdit?.dirty && !await ask("Leave without saving?", "Your changes to this style are lost.", "Leave", true)) return;
       if (S.tplEdit) { tplDraftClear(); S.tplEdit = null; }
