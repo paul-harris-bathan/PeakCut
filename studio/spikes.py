@@ -218,7 +218,7 @@ def start(url: str) -> dict:
                 tmp.write_text(json.dumps(data), encoding="utf-8")
                 tmp.replace(_file(vid))
                 _scans.pop((u, vid), None)
-                try:                               # big spikes are clipped by themselves (when both keys are set)
+                try:                               # only if PEAKCUT_SPIKE_AUTO_MAX is set: big spikes clipped by themselves
                     from . import spikeclip
                     spikeclip.auto(dict(data, spikes=find(rates)))
                 except Exception:  # noqa: BLE001 - the scan is kept either way; spikes can still be clipped by hand
