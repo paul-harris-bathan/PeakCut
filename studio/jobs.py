@@ -171,7 +171,8 @@ def public(job) -> dict:
     """What the browser may see: no server paths, no owner id."""
     out = {k: v for k, v in job.items() if k not in HIDDEN}
     out["source"] = {k: v for k, v in job["source"].items() if k != "path"}
-    out["clips"] = [{k: v for k, v in c.items() if k not in ("src", "fixed_words", "fixed_for", "heard", "trans_words", "trans_for")}
+    out["clips"] = [{k: v for k, v in c.items() if k not in ("src", "fixed_words", "fixed_for", "heard", "trans_words", "trans_for",
+                                                                       "own_words", "own_for", "shown_words")}
                     for c in job["clips"] if c.get("status") != "dropped"]
     ai = job.get("ai") or {}
     out["ai"] = {"tokens": ai.get("tokens", 0), "note": ai.get("note", ""), "used": bool(ai.get("model"))}   # never the model, never raw errors
@@ -579,6 +580,79 @@ def request_render(jid, cid, changes: dict):
     _q.put(("clip", jid, cid))
 
 
+# ---- On-screen text: the captions of a clip, to correct by hand, and the person's own words back
+LINE_GAP, LINE_WORDS = 0.7, 7          # a caption line ends at a pause this long, a sentence end, or this many words
+
+
+def caption_words(job, clip, words=None) -> list:
+    """The words on the clip, on the video's clock: what was drawn the last time it was made, else the best guess from
+    what it was made with (the person's own words, the translation, what the AI heard, the proofread words, the
+    transcript). Asks no AI."""
+    s0, e0 = clip["start"], clip["end"]
+    inside = lambda ws: [w for w in ws or [] if s0 - 0.3 <= w["s"] < e0]   # noqa: E731
+    for cand in (clip.get("own_words"), clip.get("shown_words"), clip.get("trans_words"),
+                 (clip.get("heard") or {}).get("words"), clip.get("fixed_words")):
+        got = inside(cand)
+        if got:
+            return got
+    if words is None:
+        try:
+            words = json.loads((Path(job["dir"]) / "words.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            words = []
+    return inside(words)
+
+
+def caption_lines(job, clip) -> list:
+    """The clip's captions as lines to edit: [{"s", "e", "text"}], times in seconds from the clip's start."""
+    lines, cur = [], []
+    ws = caption_words(job, clip)
+    for i, w in enumerate(ws):
+        cur.append(w)
+        nxt = ws[i + 1] if i + 1 < len(ws) else None
+        if (not nxt or nxt["s"] - w["e"] > LINE_GAP or len(cur) >= LINE_WORDS
+                or str(w["w"]).rstrip().endswith((".", "?", "!"))):
+            lines.append({"s": round(max(0.0, cur[0]["s"] - clip["start"]), 2), "e": round(max(0.0, cur[-1]["e"] - clip["start"]), 2),
+                          "text": " ".join(str(x["w"]) for x in cur)})
+            cur = []
+    return lines
+
+
+def words_from_lines(clip, lines) -> list:
+    """The person's corrected lines as words on the video's clock. A line's words share its time evenly; a line left
+    empty shows nothing there."""
+    out, dur = [], clip["end"] - clip["start"]
+    for ln in (lines or [])[:400]:
+        if not isinstance(ln, dict):
+            continue
+        try:
+            s, e = float(ln.get("s")), float(ln.get("e"))
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(s) and math.isfinite(e)):
+            continue
+        s, e = max(0.0, min(dur, s)), max(0.0, min(dur, e))
+        e = max(e, s + 0.2)
+        toks = [t for t in re.split(r"\s+", str(ln.get("text") or "")[:300].strip()) if t][:40]
+        step = (e - s) / max(1, len(toks))
+        for i, t in enumerate(toks):
+            out.append({"w": t[:40], "s": round(clip["start"] + s + i * step, 2), "e": round(clip["start"] + s + (i + 1) * step, 2)})
+    return sorted(out, key=lambda w: w["s"])
+
+
+def set_text(jid, cid, hook=None, lines=None):
+    """Save the person's own heading and/or captions for a clip and make it again with them."""
+    job = _jobs[jid]
+    clip = next(c for c in job["clips"] if c["id"] == cid)
+    changes = {}
+    if hook is not None:
+        changes["hook"] = str(hook).strip()[:60]
+    if lines is not None:
+        clip["own_words"] = words_from_lines(clip, lines)
+        clip["own_for"] = [round(clip["start"], 2), round(clip["end"], 2)]
+    request_render(jid, cid, changes)
+
+
 def clean_hashtags(v) -> list:
     """Hashtags typed by a person ("#funny gaming") or sent by the page as a list: plain words, at most 8."""
     if isinstance(v, str):
@@ -839,9 +913,15 @@ def render_one(job, clip, words):
                     clip.update(trans_words=raw, trans_for=tkey)
                 except Exception:  # noqa: BLE001 - the captions in the language spoken
                     pass
+        own = clip.get("own_words") if caps else None
+        if own:                                # typed by the person (On-screen text): shown exactly as typed, never
+            lo, hi = clip.get("own_for") or [clip["start"], clip["end"]]          # proofread or translated over
+            raw = sorted([w for w in raw if not (lo - 0.05 <= w["s"] < hi + 0.05)]
+                         + [w for w in own if clip["start"] - 0.3 <= w["s"] < clip["end"]], key=lambda w: w["s"])
+        clip["shown_words"] = [{"w": w["w"], "s": round(w["s"], 2), "e": round(w["e"], 2)} for w in raw]   # for editing later
         # the last word on it: whatever was said, nothing is drawn in Hindi or Urdu script
         # (Urdu or Hindi asked for in their own script: drawn in it; any other language: never Hindi or Urdu script)
-        script = tl if tl in ("hi", "ur") and raw and clip.get("trans_for") == span + [tl] else ""
+        script = tl if tl in ("hi", "ur") and raw and clip.get("trans_for") == span + [tl] and not own else ""
         local.update(script=script, cap_lang=tl)
         near = [dict(w, s=w["s"] - off, e=w["e"] - off) for w in (raw if script or not raw else roman.words(raw))]
         who = creators.get(job["creator"]) if job.get("creator") else None

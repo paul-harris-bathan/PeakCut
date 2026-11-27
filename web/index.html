@@ -2258,6 +2258,9 @@ textarea.cpg-in{height:auto;padding:8px 12px;resize:vertical}.cpg-in:focus{borde
 .spk-st.ok{background:var(--good-soft);color:var(--good)}.spk-st.bad{background:var(--bad-soft);color:var(--bad)}
 .spk-pick input{width:16px;height:16px}.spk-open{justify-content:space-between;gap:12px;margin:8px 0}
 .el-row{gap:8px;margin:10px 0 6px}.el-row input{flex:1;min-width:0}
+.scr-dlg{max-width:620px;width:100%}.scr-lines{display:grid;gap:6px;margin:12px 0;max-height:46vh;overflow:auto;padding-right:4px}
+.scr-line{display:flex;align-items:center;gap:10px}.scr-t{flex:none;width:40px;font-size:12px;font-weight:600;color:var(--dim);font-variant-numeric:tabular-nums}
+.scr-line input{flex:1;min-width:0}
 .img-dlg{max-width:600px}.img-main{display:flex;gap:18px;align-items:flex-start;margin:12px 0;flex-wrap:wrap}
 .img-stage{position:relative;flex:none;overflow:hidden;border-radius:var(--r-sm);background:#1d1410;touch-action:none}
 .img-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.9;pointer-events:none}
@@ -4272,6 +4275,36 @@ function selClips() {          // every finished clip the selection covers, for 
 /* ---- Quick edit: put a picture on the selected clips (or take it off), each made again with it.
    Drag it on the preview to place it; the slider sets how wide it is (it keeps its shape). */
 const IMG_SPOTS = [["tl", "Top left"], ["tc", "Top middle"], ["tr", "Top right"], ["mc", "Middle"], ["bl", "Bottom left"], ["bc", "Bottom middle"], ["br", "Bottom right"]];
+/* ---- On-screen text: correct a clip's heading and captions; it is made again with exactly what was typed */
+async function screenDialog(jid, cid) {
+  let t;
+  try { t = await api(`/api/jobs/${encodeURIComponent(jid)}/clips/${encodeURIComponent(cid)}/screen`); }
+  catch (err) { return toast(err.message, "bad"); }
+  const d = $("#formdlg"), mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  d.innerHTML = `<form method="dialog" class="dlg scr-dlg"><h2>On-screen text</h2>
+    <p class="help">Type over anything wrong. Each caption line keeps its time; if you add or remove words, they share that line's time. Clear a line to show nothing there. The clip is made again with exactly what you type.</p>
+    <label class="f">Heading (the big text)<input id="scr_hook" maxlength="60" value="${esc(t.hook)}" placeholder="No heading"></label>
+    ${t.captions ? (t.lines.length ? `<div class="scr-lines" role="list">${t.lines.map((l, i) => `<label class="scr-line" role="listitem"><span class="scr-t">${mmss(l.s)}</span>
+      <input data-scr="${i}" maxlength="300" value="${esc(l.text)}" aria-label="Caption at ${mmss(l.s)}"></label>`).join("")}</div>`
+      : `<p class="sub">This clip has no caption words to fix.</p>`) : `<p class="sub">Captions are turned off for this clip.</p>`}
+    ${t.edited ? `<p class="sub">${ic("check")} You've corrected these captions before.</p>` : ""}
+    <div class="dlg-foot"><span class="grow"></span><button class="btn" value="no">Cancel</button><button class="btn primary" value="yes">${ic("scissors")}Save and re-make</button></div></form>`;
+  d.returnValue = "no";
+  d.onclose = async () => {
+    if (d.returnValue !== "yes") return;
+    const body = {}, hook = ($("#scr_hook")?.value || "").trim();
+    if (hook !== (t.hook || "")) body.hook = hook;
+    const lines = t.lines.map((l, i) => ({s: l.s, e: l.e, text: (d.querySelector(`[data-scr="${i}"]`)?.value ?? l.text).trim()}));
+    if (lines.some((l, i) => l.text !== t.lines[i].text)) body.lines = lines;
+    if (!Object.keys(body).length) return toast("Nothing was changed.");
+    try {
+      await send(`/api/jobs/${encodeURIComponent(jid)}/clips/${encodeURIComponent(cid)}/screen`, body, "PUT");
+      toast("Saved. The clip is being made again with your text.", "ok");
+      await tick(); render();
+    } catch (err) { toast(err.message, "bad"); }
+  };
+  d.showModal();
+}
 function imageDialog(pairs) {
   if (!pairs.length) return toast("Select finished clips first.", "bad");
   const d = $("#formdlg"), st = {file: "", url: "", ar: 1, x: 0.75, y: 0.15, w: 0.3, full: false};
@@ -6205,6 +6238,9 @@ function drawClipDlg(full) {
           <button class="btn sm primary" data-act="cdremake" hidden>${ic("scissors")}Make again</button></div>
           ${c.soft ? `<p class="hq-note">${ic("warn")}This video is low quality, so the zoomed-in part may look soft.</p>` : ""}
           ${c.status === "done" ? (c.checks || []).map(x => `<p class="hq-note bad">${ic("warn")}${esc(x.text)}</p>`).join("") : ""}</div>` : ""}
+        ${c.status === "done" ? `<div class="ce3-f"><label>On-screen text</label><div class="row" style="gap:8px;align-items:center">
+          <button type="button" class="btn sm" data-act="cdscreen" data-j="${esc(j.id)}" data-c="${esc(c.id)}">Fix heading or captions</button>
+          <span class="sub">When the words on the video are wrong</span></div></div>` : ""}
         <div class="ce3-line"></div>
         <div id="dposts"></div>
         ${c.status !== "done" ? `<p class="ce2-note">${c.status === "error" ? "This clip couldn't be made, so it can't be posted." : "It can be posted once it's made."}</p>` : postSoon() ? soonBox() : accs.length ? (accs.every(gone) ? `<p class="ce2-note">It's going to every account you have.</p>` : `
@@ -6744,6 +6780,7 @@ document.addEventListener("click", async e => {
     }
     if (a === "dlall") return zipDownload((jobOf(d.j)?.clips || []).filter(c => c.status === "done").map(c => d.j + "." + c.id));
     if (a === "seldl") return zipDownload(selClips());
+    if (a === "cdscreen") return screenDialog(d.j, d.c);
     if (a === "selimage") return imageDialog(selClips().map(k => { const i = k.lastIndexOf("."); return [k.slice(0, i), k.slice(i + 1)]; }));
     if (a === "selclear") { sel().clear(); return render(); }
     if (a === "selall") {
