@@ -2245,7 +2245,11 @@ textarea.cpg-in{height:auto;padding:8px 12px;resize:vertical}.cpg-in:focus{borde
 .spk-axis{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);margin-top:4px}
 .spk-sens{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0 4px;font-weight:600}.spk-sens input{width:180px}.spk-sens span{font-weight:400;color:var(--dim);font-size:13px}
 .spk-lists{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px;margin-top:16px}
-.spk-ul{list-style:none;padding:0;margin:8px 0 0;display:grid;gap:6px}.spk-ul li{display:flex;align-items:baseline;gap:10px}
+.spk-ul{list-style:none;padding:0;margin:8px 0 0;display:grid;gap:6px}.spk-ul li{display:flex;align-items:center;gap:10px}
+.spk-st{font-size:12px;font-weight:600;padding:1px 8px;border-radius:var(--r-sm);background:var(--brand-soft);color:var(--brand-deep);white-space:nowrap}
+.spk-st.ok{background:var(--good-soft);color:var(--good)}.spk-st.bad{background:var(--bad-soft);color:var(--bad)}
+.spk-pick input{width:16px;height:16px}.spk-open{justify-content:space-between;gap:12px;margin:8px 0}
+.el-row{gap:8px;margin:10px 0 6px}.el-row input{flex:1;min-width:0}
 .clip-warn{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12.5px;color:var(--bad);min-width:0}
 .clip-warn svg{width:14px;height:14px;flex:none}.clip-warn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* the cam's own corners and border (the border drawn over the picture, inside the box, as in the clip) */
@@ -3556,7 +3560,7 @@ function go(v, tab, fromHistory) {
   if (v === "overview") { view.innerHTML = `<div id="homeLive"></div><div id="homeCamps"></div><div id="ov"></div>`; drawHomeLive(); loadHomeLive(); drawHomeCamps(); if (!S.cp.rows || Date.now() - (S.cp.at || 0) > 600000) loadCampaigns(); }
   else if (v === "library") view.innerHTML = `<div id="add"></div><div id="jobs"></div>`;
   else if (v === "settings") view.innerHTML = `<div id="sform"></div>`;
-  else if (v === "usage") { view.innerHTML = `<div id="aikey"></div><div id="usage"></div>`; drawAiKey(); loadUsage(); }
+  else if (v === "usage") { view.innerHTML = `<div id="aikey"></div><div id="elkey"></div><div id="usage"></div>`; drawAiKey(); drawElevenKey(); loadUsage(); }
   else if (v === "styles") view.innerHTML = `<div class="sty-page" id="setbody"><div class="set-load">Loading…</div></div>`;
   else if (v === "discover" && S.dzv === "mine") view.innerHTML = myStreamers();
   else if (v === "discover") { view.innerHTML = discoverPage(); discoverWire(); loadDiscover(); }
@@ -5081,6 +5085,18 @@ document.addEventListener("drop", e => {
 // Three steps: pick the service, paste the key, pick a model. As soon as a key is pasted (or one is already saved),
 // the service is asked which text models that key can use, and the person picks from that list. Typing a model id is
 // only offered when the service gives no list (a custom or local service) or for a model the list doesn't show.
+async function drawElevenKey() {
+  // spike mode's speech-to-text: its own key, kept on this computer like the AI key and never shown again
+  const box = $("#elkey"); if (!box) return;
+  if (!S.status.user?.is_admin) { box.innerHTML = ""; return; }
+  let k;
+  try { k = await api("/api/eleven"); } catch { return; }
+  box.innerHTML = `<section class="set-sec el-sec"><h2>ElevenLabs <span class="sub">for chat spike clips</span></h2>
+    <p class="help">Spike clips use ElevenLabs to write down what is said in each clip (about a minute of sound per clip, never the whole video). You pay ElevenLabs directly. <a href="${esc(k.key_url)}" target="_blank" rel="noopener">Get a key</a>.</p>
+    <div class="row el-row"><input id="el_key" type="password" autocomplete="off" spellcheck="false" placeholder="${k.has_key ? `Saved${k.key_hint ? ", ends in " + esc(k.key_hint) : ""}. Paste a new key to replace it` : "Paste your ElevenLabs key"}" aria-label="ElevenLabs key">
+      <button class="btn primary" data-act="elsave">Save</button>${k.has_key ? `<button class="btn ghost" data-act="elremove">Remove key</button>` : ""}</div>
+    <p class="sub">${k.has_key ? `${ic("check")} Key saved. Model: ${esc(k.model)}.` : "No key saved: spikes can be found, but not clipped."}</p></section>`;
+}
 async function drawAiKey() {
   const box = $("#aikey"); if (!box) return;
   if (!S.status.user?.is_admin) { box.innerHTML = ""; return; }
@@ -6181,7 +6197,8 @@ async function spkLoad(vid = SPK.vid) {
   } catch (e) { toast(e.message, "bad"); }
   if (S.view !== "spikes") return;
   drawSpikes();
-  const busy = (SPK.data && SPK.data.status === "scanning") || SPK.list.some(x => x.status === "scanning");
+  const busy = (SPK.data && SPK.data.status === "scanning") || SPK.list.some(x => x.status === "scanning")
+    || (SPK.data && SPK.data.clips && ["queued", "running"].includes(SPK.data.clips.status));
   if (busy) SPK.timer = setTimeout(() => S.view === "spikes" && spkLoad(), 2000);
 }
 function spkPoints(d) {
@@ -6207,12 +6224,30 @@ function spkGraph(d) {
       <line id="spkcur" x1="0" x2="0" y1="0" y2="${H}" class="spk-cur" visibility="hidden"/></svg><div class="spk-tip" id="spktip" hidden></div></div>
     <div class="spk-axis"><span>0:00:00</span><span>${hms((d.length || 0) / 2)}</span><span>${hms(d.length || 0)}</span></div></div>`;
 }
+function spkState(d, t) {
+  // what happened to the spike clip nearest this moment (spikes within 30 s are one clip)
+  const s = ((d.clips || {}).spikes || []).find(x => Math.abs(x.t - t) < 30);
+  if (!s) return null;
+  const st = {done: ["ok", "Clip made"], rendering: ["wait", "Making…"], queued: ["wait", "Waiting"], error: ["bad", "Couldn't be made"],
+              dropped: ["bad", "Left out"]}[s.clip || "queued"] || ["wait", "Making…"];
+  return {k: st[0], label: st[1], tip: s.error || ""};
+}
 function spkList(d) {
   const big = (d.spikes || []).filter(s => s.level === "big"), minor = (d.spikes || []).filter(s => s.level === "minor");
-  const row = s => `<li><b>${hms(s.t)}</b><span class="sub">${s.times}× normal chat</span></li>`;
-  return `<div class="spk-lists"><section><h3>Big spikes <span class="sub">(${big.length})</span></h3><p class="help">These will be clipped by themselves once spike clipping is added.</p>
+  const keys = d.keys || {}, ready = keys.ai && keys.eleven, cl = d.clips;
+  const row = s => {
+    const st = spkState(d, s.t);
+    return `<li>${st ? `<span class="spk-st ${st.k}" title="${esc(st.tip || "")}">${esc(st.label)}</span>` : ready ? `<label class="spk-pick"><input type="checkbox" data-spkpick value="${s.t}" aria-label="Clip the spike at ${hms(s.t)}"></label>` : ""}
+      <b>${hms(s.t)}</b><span class="sub">${s.times}× normal chat</span></li>`;
+  };
+  const need = !ready ? `<p class="hq-note bad">${ic("warn")}${!keys.ai ? "Add your AI key" : "Add your ElevenLabs key"} on the AI page to clip spikes. Big spikes are clipped by themselves once both keys are there and you scan again.
+      <button class="btn sm" data-act="go" data-v="usage">Open AI page</button></p>` : "";
+  const open = cl ? `<div class="row spk-open"><span class="sub">${esc(cl.stage || "")}</span><button class="btn sm" data-act="go" data-v="${cl.creator ? "c:" + esc(cl.creator) : "library"}">${ic("film")}Open the clips</button></div>` : "";
+  const picker = ready && [...big, ...minor].some(s => !spkState(d, s.t)) ? `<button class="btn primary sm" data-act="spkmake">${ic("scissors")}Make clips from ticked spikes</button>` : "";
+  return `${need}${open}<div class="spk-lists"><section><h3>Big spikes <span class="sub">(${big.length})</span></h3><p class="help">Clipped by themselves when a scan finishes (up to 10, biggest first).</p>
       ${big.length ? `<ul class="spk-ul">${big.map(row).join("")}</ul>` : `<p class="sub">None at this setting.</p>`}</section>
-    <section><h3>Worth a look <span class="sub">(${minor.length})</span></h3>${minor.length ? `<ul class="spk-ul">${minor.map(row).join("")}</ul>` : `<p class="sub">None at this setting.</p>`}</section></div>`;
+    <section><h3>Worth a look <span class="sub">(${minor.length})</span></h3>${minor.length ? `<ul class="spk-ul">${minor.map(row).join("")}</ul>` : `<p class="sub">None at this setting.</p>`}</section></div>
+    ${picker ? `<div class="row" style="margin-top:12px">${picker}</div>` : ""}`;
 }
 function drawSpikes() {
   const box = $("#spk"); if (!box) return;
@@ -6413,6 +6448,24 @@ document.addEventListener("click", async e => {
         else if (ok) toast(`Saved. ${ok.model} answered, so the AI is ready.`, "ok");
         else toast(`Saved, but the test failed. ${why}`, "bad");
       } finally { b.disabled = false; }
+      return;
+    }
+    if (a === "elsave") {
+      const v = ($("#el_key")?.value || "").trim(); if (!v) return toast("Paste your ElevenLabs key first.", "bad");
+      b.disabled = true;
+      try { await send("/api/eleven", {key: v}, "PUT"); toast("ElevenLabs key saved.", "ok"); await drawElevenKey(); } finally { b.disabled = false; }
+      return;
+    }
+    if (a === "elremove") {
+      if (!await ask("Remove the ElevenLabs key?", "Spikes can still be found, but no spike clips are made until you add a key again.", "Remove", true)) return;
+      await api("/api/eleven/key", {method: "DELETE"}); toast("ElevenLabs key removed.", "ok"); return drawElevenKey();
+    }
+    if (a === "spkmake") {
+      const times = [...document.querySelectorAll("[data-spkpick]:checked")].map(x => Number(x.value));
+      if (!times.length) return toast("Tick the spikes you want clipped.", "bad");
+      b.disabled = true;
+      try { await send(`/api/spikes/${encodeURIComponent(SPK.vid)}/clip`, {times}); toast(`Making ${times.length} spike clip${times.length > 1 ? "s" : ""}.`, "ok"); await spkLoad(); }
+      finally { b.disabled = false; }
       return;
     }
     if (a === "spkunit") { SPK.unit = Number(d.k); return drawSpikes(); }

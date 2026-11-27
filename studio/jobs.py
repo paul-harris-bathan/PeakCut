@@ -1522,7 +1522,10 @@ def _worker(quick_only=False):
             continue
         token = ctx._uid.set(job["user"])  # everything this job does runs as its owner
         try:
-            if kind == "job":
+            if kind == "job" and job.get("kind") == "spikes":
+                from . import spikeclip            # a clip from each chat spike of a Twitch VOD
+                spikeclip.run(job)
+            elif kind == "job":
                 _run_job(job)
             else:
                 clip = next(c for c in job["clips"] if c["id"] == cid)

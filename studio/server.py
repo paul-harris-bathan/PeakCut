@@ -23,7 +23,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from . import admin as admins
-from . import campaigns, discover, spikes
+from . import campaigns, discover, eleven, spikeclip, spikes
 from . import account, load, shortcut, updates
 from . import (accounts, ai, alerts, auth, brain, config, creators, ctx, db, jobs, live, media, posting,
                profiles, render, safe, templates, transcribe, usage)
@@ -2102,7 +2102,50 @@ def spike_scan(vid: str, s: float = 1.0):
         raise HTTPException(400, str(e))
     if not got:
         raise HTTPException(404, "No scan of that video.")
+    got["clips"] = spikeclip.summary(vid)            # the spike clips made from it, and what happened to each spike
+    got["keys"] = spikeclip.keys_state()
     return got
+
+
+@app.post("/api/spikes/{vid}/clip")
+def spike_clip(vid: str, body: dict = Body(...)):
+    """Make clips from these spikes (seconds into the VOD)."""
+    try:
+        scan = spikes.get(vid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not scan or scan.get("status") != "done":
+        raise HTTPException(404, "Scan the VOD's chat first.")
+    times = [t for t in (body.get("times") or []) if isinstance(t, (int, float)) and 0 <= t <= float(scan.get("length") or 0)][:50]
+    if not times:
+        raise HTTPException(400, "Pick at least one spike.")
+    try:
+        job = spikeclip.clip_spikes(scan, times)
+    except spikeclip.NotReady as e:
+        raise HTTPException(409, str(e))
+    return {"job": job["id"], "clips": spikeclip.summary(vid)}
+
+
+# ---- the ElevenLabs key (spike mode's speech-to-text), next to the AI key
+@app.get("/api/eleven")
+def eleven_get(request: Request):
+    _admin(request)
+    return eleven.public()
+
+
+@app.put("/api/eleven")
+def eleven_put(request: Request, body: dict = Body(...)):
+    _admin(request)
+    try:
+        return eleven.save(body.get("key"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/eleven/key")
+def eleven_remove(request: Request):
+    _admin(request)
+    return eleven.remove()
 
 
 @app.delete("/api/spikes/{vid}")
