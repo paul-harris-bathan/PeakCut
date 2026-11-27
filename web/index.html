@@ -6391,6 +6391,18 @@ document.addEventListener("click", async e => {
   const a = b.dataset.act, d = b.dataset;
   if (b.tagName === "A") e.preventDefault();
   try {
+    if (a === "vodclip") {                         // a streamer's recent Twitch VOD: clip it the usual way
+      const cid = creatorId(); b.disabled = true;
+      try { await send("/api/jobs", {url: d.k, creator: cid}); toast("Clipping this VOD. It shows below as it goes.", "ok"); await tick(); drawVods(); }
+      catch (err) { toast(err.message, "bad"); } finally { b.disabled = false; }
+      return;
+    }
+    if (a === "vodspikes") {                       // ...or find where its chat spiked
+      b.disabled = true;
+      try { const got = await send("/api/spikes", {url: d.k}); SPK.vid = got.id; SPK.data = got; go("spikes"); }
+      catch (err) { toast(err.message, "bad"); } finally { b.disabled = false; }
+      return;
+    }
     if (a === "go") { closePops();
       if (S.tplEdit?.dirty && !await ask("Leave without saving?", "Your changes to this style are lost.", "Leave", true)) return;
       if (S.tplEdit) { tplDraftClear(); S.tplEdit = null; }
@@ -6442,18 +6454,6 @@ document.addEventListener("click", async e => {
         else if (ok) toast(`Saved. ${ok.model} answered, so the AI is ready.`, "ok");
         else toast(`Saved, but the test failed. ${why}`, "bad");
       } finally { b.disabled = false; }
-      return;
-    }
-    if (a === "vodclip") {
-      const cid = creatorId(); b.disabled = true;
-      try { await send("/api/jobs", {url: d.k, creator: cid}); toast("Clipping this VOD. It shows below as it goes.", "ok"); await tick(); drawVods(); }
-      catch (err) { toast(err.message, "bad"); } finally { b.disabled = false; }
-      return;
-    }
-    if (a === "vodspikes") {
-      b.disabled = true;
-      try { const got = await send("/api/spikes", {url: d.k}); SPK.vid = got.id; SPK.data = got; go("spikes"); }
-      catch (err) { toast(err.message, "bad"); } finally { b.disabled = false; }
       return;
     }
     if (a === "spkunit") { SPK.unit = Number(d.k); return drawSpikes(); }
