@@ -540,6 +540,57 @@ def _own_computer(request: Request):
         raise HTTPException(409, "This only works on the computer PeakCut runs on.")
 
 
+# ---- downloaded clips in Desktop\PeakCut Clips\<streamer>\<video>\ (see studio/clipfolder.py)
+@app.get("/api/jobs/{jid}/folder")
+def job_folder(jid: str):
+    from . import clipfolder
+    return clipfolder.info(_job_or_404(jid))
+
+
+@app.post("/api/jobs/{jid}/save")
+def job_save(jid: str, request: Request, body: dict = Body(default={})):
+    """Copy finished clips (all, or the ones named) into the video's folder on the desktop, with its clips.txt."""
+    from . import clipfolder
+    _own_computer(request)
+    job = _job_or_404(jid)
+    ids = body.get("clips")
+    try:
+        got = clipfolder.save(job, [str(x) for x in ids] if isinstance(ids, list) else None)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except OSError as e:
+        raise HTTPException(500, "Couldn't save to the desktop: " + safe.friendly(e, 200))
+    jobs.save(job)
+    return got
+
+
+@app.put("/api/jobs/{jid}/folder")
+def job_folder_name(jid: str, request: Request, body: dict = Body(...)):
+    from . import clipfolder
+    _own_computer(request)
+    job = _job_or_404(jid)
+    try:
+        got = clipfolder.rename(job, str(body.get("name") or ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except OSError as e:
+        raise HTTPException(409, "Couldn't rename the folder (is a file in it open?): " + safe.friendly(e, 200))
+    jobs.save(job)
+    ctx.bump()
+    return got
+
+
+@app.post("/api/jobs/{jid}/folder/open")
+def job_folder_open(jid: str, request: Request):
+    from . import clipfolder
+    _own_computer(request)
+    try:
+        clipfolder.open_folder(_job_or_404(jid))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True}
+
+
 @app.post("/api/app/shortcut")
 def app_shortcut(request: Request):
     _own_computer(request)
