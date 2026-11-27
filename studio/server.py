@@ -23,7 +23,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from . import admin as admins
-from . import campaigns, discover
+from . import campaigns, discover, spikes
 from . import account, load, shortcut, updates
 from . import (accounts, ai, alerts, auth, brain, config, creators, ctx, db, jobs, live, media, posting,
                profiles, render, safe, templates, transcribe, usage)
@@ -2076,6 +2076,43 @@ def campaign_logo_file(cid: str, key: str):
     kinds = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
              ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm"}
     return FileResponse(f, media_type=kinds.get(f.suffix.lower(), "application/octet-stream"), headers={"Cache-Control": "private, no-cache"})
+
+
+# ---------------------------------------------------------------- spike mode: where chat went wild in a Twitch VOD
+@app.get("/api/spikes")
+def spike_scans():
+    return spikes.all_scans()
+
+
+@app.post("/api/spikes")
+def spike_start(body: dict = Body(...)):
+    try:
+        return spikes.start(str(body.get("url") or ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception:  # noqa: BLE001 - Twitch didn't answer
+        raise HTTPException(502, "Twitch didn't answer. Try again in a minute.")
+
+
+@app.get("/api/spikes/{vid}")
+def spike_scan(vid: str, s: float = 1.0):
+    try:
+        got = spikes.get(vid, min(4.0, max(0.25, s)))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not got:
+        raise HTTPException(404, "No scan of that video.")
+    return got
+
+
+@app.delete("/api/spikes/{vid}")
+def spike_forget(vid: str):
+    try:
+        spikes.forget(vid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    ctx.bump()
+    return {"ok": True}
 
 
 @app.get("/api/creators")
