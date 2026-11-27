@@ -2258,6 +2258,16 @@ textarea.cpg-in{height:auto;padding:8px 12px;resize:vertical}.cpg-in:focus{borde
 .spk-st.ok{background:var(--good-soft);color:var(--good)}.spk-st.bad{background:var(--bad-soft);color:var(--bad)}
 .spk-pick input{width:16px;height:16px}.spk-open{justify-content:space-between;gap:12px;margin:8px 0}
 .el-row{gap:8px;margin:10px 0 6px}.el-row input{flex:1;min-width:0}
+.img-dlg{max-width:600px}.img-main{display:flex;gap:18px;align-items:flex-start;margin:12px 0;flex-wrap:wrap}
+.img-stage{position:relative;flex:none;overflow:hidden;border-radius:var(--r-sm);background:#1d1410;touch-action:none}
+.img-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.9;pointer-events:none}
+.img-pic{position:absolute;cursor:grab;user-select:none;outline:2px dashed rgba(255,255,255,.85);outline-offset:1px}.img-pic:active{cursor:grabbing}
+.img-pic.full{cursor:default;outline:none}
+.img-pick{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:6px;cursor:pointer;color:#fff;font-weight:600;background:rgba(0,0,0,.35)}
+.img-pick svg{width:24px;height:24px}
+.img-side{flex:1;min-width:200px;display:grid;gap:14px}.img-side b{display:block;margin-bottom:6px}.img-side input[type=range]{width:100%}
+.img-change{justify-self:start}.img-spots{display:flex;flex-wrap:wrap;gap:6px}
+.img-spots .chip.on{background:var(--brand);color:#fff;border-color:var(--brand)}
 .clip-warn{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12.5px;color:var(--bad);min-width:0}
 .clip-warn svg{width:14px;height:14px;flex:none}.clip-warn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* the cam's own corners and border (the border drawn over the picture, inside the box, as in the clip) */
@@ -4259,6 +4269,91 @@ function selClips() {          // every finished clip the selection covers, for 
   clipsSel.forEach(([j, c]) => { if (jobOf(j)?.clips.find(x => x.id === c)?.status === "done") out.set(j + "." + c, 1); });
   return [...out.keys()];
 }
+/* ---- Quick edit: put a picture on the selected clips (or take it off), each made again with it.
+   Drag it on the preview to place it; the slider sets how wide it is (it keeps its shape). */
+const IMG_SPOTS = [["tl", "Top left"], ["tc", "Top middle"], ["tr", "Top right"], ["mc", "Middle"], ["bl", "Bottom left"], ["bc", "Bottom middle"], ["br", "Bottom right"]];
+function imageDialog(pairs) {
+  if (!pairs.length) return toast("Select finished clips first.", "bad");
+  const d = $("#formdlg"), st = {file: "", url: "", ar: 1, x: 0.75, y: 0.15, w: 0.3, full: false};
+  const had = pairs.filter(([j, c]) => jobOf(j)?.clips.find(x => x.id === c)?.image).length;
+  const first = (() => { for (const [j, c] of pairs) { const jb = jobOf(j), cl = jb?.clips.find(x => x.id === c); if (cl?.cover) return `/media/${encodeURIComponent(j)}/${encodeURIComponent(cl.cover)}?v=${cl.version || 0}`; } return ""; })();
+  const PW = 216, PH = 384;                                    // the preview: a 1080x1920 clip at a fifth of its size
+  const hShare = () => st.w * 1080 / st.ar / 1920;             // the picture's height, as a share of the frame's height
+  const spot = k => {                                          // a quick spot, clear of the edges like a logo
+    const hw = st.w / 2, hh = hShare() / 2;
+    st.x = k[1] === "l" ? 0.04 + hw : k[1] === "r" ? 0.96 - hw : 0.5;
+    st.y = k[0] === "t" ? 0.03 + hh : k[0] === "b" ? 0.84 - hh : 0.5;
+    st.full = false;
+  };
+  const place = () => {                                        // move the picture on the preview to match st
+    const pic = d.querySelector("#imgpic"); if (!pic) return;
+    if (st.full) Object.assign(pic.style, {left: "0px", top: "0px", width: PW + "px", height: PH + "px"});
+    else {
+      const w = st.w * PW, h = w / st.ar;
+      Object.assign(pic.style, {left: (st.x * PW - w / 2) + "px", top: (st.y * PH - h / 2) + "px", width: w + "px", height: h + "px"});
+    }
+    const lab = d.querySelector("#imgsizelab"); if (lab) lab.textContent = st.full ? "Whole frame" : `${Math.round(st.w * 100)}% of the width`;
+  };
+  const draw = () => {
+    d.innerHTML = `<form method="dialog" class="dlg img-dlg"><h2>Add an image to ${pairs.length} clip${pairs.length === 1 ? "" : "s"}</h2>
+      <p class="help">PNG (see-through parts stay see-through), JPG, WebP or a moving GIF. Drag it where you want it. It goes on top of every selected clip, with any campaign logo still there, and each clip is made again.</p>
+      <div class="img-main">
+        <div class="img-stage" style="width:${PW}px;height:${PH}px">${first ? `<img class="img-bg" src="${esc(first)}" alt="">` : ""}
+          ${st.url ? `<img id="imgpic" class="img-pic ${st.full ? "full" : ""}" src="${esc(st.url)}" alt="Your picture" draggable="false">` : `<label class="img-pick">${ic("plus")}<span>Choose a picture</span><input type="file" id="imgfile" accept="image/png,image/jpeg,image/webp,image/gif" hidden></label>`}</div>
+        <div class="img-side">
+          ${st.url ? `<label class="btn sm ghost img-change">Change picture<input type="file" id="imgfile" accept="image/png,image/jpeg,image/webp,image/gif" hidden></label>` : ""}
+          <div><b>Size</b><input type="range" id="imgsize" min="5" max="100" step="1" value="${Math.round(st.w * 100)}" ${st.url && !st.full ? "" : "disabled"} aria-label="Picture width"><span class="sub" id="imgsizelab"></span></div>
+          <div><b>Quick spots</b><div class="img-spots">${IMG_SPOTS.map(([k, l]) => `<button type="button" class="chip" data-imgspot="${k}" ${st.url ? "" : "disabled"}>${l}</button>`).join("")}
+            <button type="button" class="chip ${st.full ? "on" : ""}" data-imgfull ${st.url ? "" : "disabled"} aria-pressed="${st.full}">Whole frame</button></div></div>
+        </div></div>
+      <div class="dlg-foot">${had ? `<button class="btn ghost" value="remove">Remove image from ${had} clip${had === 1 ? "" : "s"}</button>` : ""}<span class="grow"></span>
+        <button class="btn" value="no">Cancel</button><button class="btn primary" value="yes" ${st.file ? "" : "disabled"}>Add to ${pairs.length} clip${pairs.length === 1 ? "" : "s"}</button></div></form>`;
+    d.querySelectorAll("#imgfile").forEach(inp => inp.onchange = async e => {
+      const f = e.target.files[0]; if (!f) return;
+      if (f.size > 15 * 1024 * 1024) return toast("That picture is too big. The limit is 15 MB.", "bad");
+      const fd = new FormData(); fd.append("file", f);
+      try {
+        const r = await api("/api/overlays", {method: "POST", body: fd});
+        st.file = r.image; st.url = `/api/overlays/${encodeURIComponent(r.image)}`; st.ar = r.width && r.height ? r.width / r.height : 1;
+        if (!st.full) spot("tr");
+        draw();
+      } catch (err) { toast(err.message, "bad"); }
+    });
+    const pic = d.querySelector("#imgpic"), stage = d.querySelector(".img-stage");
+    if (pic && !st.full) {
+      pic.onpointerdown = e => {
+        e.preventDefault(); pic.setPointerCapture(e.pointerId);
+        const r = stage.getBoundingClientRect(), dx = e.clientX - (r.left + st.x * r.width), dy = e.clientY - (r.top + st.y * r.height);
+        pic.onpointermove = m => {
+          st.x = Math.min(1.2, Math.max(-0.2, (m.clientX - dx - r.left) / r.width));
+          st.y = Math.min(1.2, Math.max(-0.2, (m.clientY - dy - r.top) / r.height));
+          place();
+        };
+        pic.onpointerup = pic.onpointercancel = () => { pic.onpointermove = null; };
+      };
+    }
+    const sz = d.querySelector("#imgsize");
+    if (sz) sz.oninput = () => { st.w = Number(sz.value) / 100; place(); };
+    d.querySelectorAll("[data-imgspot]").forEach(b => b.onclick = () => { spot(b.dataset.imgspot); draw(); });
+    const fb = d.querySelector("[data-imgfull]");
+    if (fb) fb.onclick = () => { st.full = !st.full; draw(); };
+    place();
+  };
+  draw();
+  d.returnValue = "no";
+  d.onclose = async () => {
+    const how = d.returnValue;
+    if (how !== "yes" && how !== "remove") return;
+    const image = how !== "yes" ? null : st.full ? {file: st.file, pos: "full"}
+      : {file: st.file, x: +st.x.toFixed(4), y: +st.y.toFixed(4), w: +st.w.toFixed(4)};
+    try {
+      const r = await send("/api/clips/image", {clips: pairs, image});
+      toast(`${how === "yes" ? "Adding the image to" : "Removing the image from"} ${r.made} clip${r.made === 1 ? "" : "s"}${r.busy ? `; ${r.busy} still being made, skipped` : ""}.`, "ok");
+      sel().clear(); await tick(); render();
+    } catch (err) { toast(err.message, "bad"); }
+  };
+  d.showModal();
+}
 function drawSelBar() {
   let bar = $("#selbar");
   if (!bar) { bar = document.createElement("div"); bar.id = "selbar"; bar.setAttribute("role", "toolbar"); bar.setAttribute("aria-label", "Selected items"); document.body.append(bar); }
@@ -4272,6 +4367,7 @@ function drawSelBar() {
   put(bar, `<b>${n} selected</b>
     <button class="btn sm" data-act="selall">Select all</button>
     <button class="btn sm primary" data-act="seldl" ${dl ? "" : "disabled"}>${ic("down")}Download${dl ? ` ${dl} clip${dl === 1 ? "" : "s"}` : ""}</button>
+    <button class="btn sm" data-act="selimage" ${dl ? "" : "disabled"} title="Put a picture on the selected clips">${ic("plus")}Add image</button>
     <button class="btn sm danger" data-act="seldel">${ic("trash")}Delete</button>
     <button class="btn sm" data-act="selclear">Cancel</button>`);
 }
@@ -6638,6 +6734,7 @@ document.addEventListener("click", async e => {
     }
     if (a === "dlall") return zipDownload((jobOf(d.j)?.clips || []).filter(c => c.status === "done").map(c => d.j + "." + c.id));
     if (a === "seldl") return zipDownload(selClips());
+    if (a === "selimage") return imageDialog(selClips().map(k => { const i = k.lastIndexOf("."); return [k.slice(0, i), k.slice(i + 1)]; }));
     if (a === "selclear") { sel().clear(); return render(); }
     if (a === "selall") {
       const cid = creatorId();

@@ -1322,6 +1322,89 @@ def rerender(jid: str, cid: str, body: dict = Body(...)):
     return jobs.public(job)
 
 
+# ---- Quick edit: a picture on chosen clips (studio/overlays.py)
+@app.post("/api/overlays")
+async def overlay_upload(file: UploadFile = File(...)):
+    """Keep a picture to put on clips. Returns its name, to send with the clips it goes on."""
+    from . import overlays
+    _throttle("overlay:" + ctx.uid(), 30, 600)
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in overlays.TYPES:
+        raise HTTPException(400, "Upload a PNG, JPG, WebP or GIF picture.")
+    tmp = overlays.folder() / f"up-{os.urandom(6).hex()}{ext}.part"
+    size = 0
+    try:
+        with tmp.open("wb") as f:
+            while chunk := await file.read(1 << 20):
+                size += len(chunk)
+                if size > overlays.MAX_MB * 1024 * 1024:
+                    raise HTTPException(413, f"That picture is too big. The limit is {overlays.MAX_MB} MB.")
+                f.write(chunk)
+
+        def look(path):              # only a real picture is kept: Pillow must be able to read it
+            from PIL import Image
+            with Image.open(path) as im:
+                im.verify()
+            with Image.open(path) as im:
+                return {"width": im.width, "height": im.height, "format": (im.format or "").upper()}
+        try:
+            meta = await run_in_threadpool(look, tmp)
+        except Exception:  # noqa: BLE001
+            meta = {}
+        if meta.get("format") not in ("PNG", "JPEG", "WEBP", "GIF") or not meta.get("width"):
+            raise HTTPException(400, "That file couldn't be read as a picture. Try a PNG with a see-through background.")
+        name = overlays.keep(tmp, ext)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return {"image": name, "width": meta["width"], "height": meta["height"]}
+
+
+@app.get("/api/overlays/{name}")
+def overlay_file(name: str):
+    """A kept picture, for the Add image preview (the page only shows pictures from its own address)."""
+    from . import overlays
+    p = overlays.path_of(name)
+    if not p:
+        raise HTTPException(404)
+    kinds = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif"}
+    return FileResponse(p, media_type=kinds.get(p.suffix.lower(), "application/octet-stream"),
+                        headers={"Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff"})
+
+
+@app.post("/api/clips/image")
+def clips_image(body: dict = Body(...)):
+    """Put a picture on these clips (or take it off, with "image": null) and make each again. Clips still being made
+    are skipped and counted."""
+    pairs = [p for p in (body.get("clips") or []) if isinstance(p, list) and len(p) == 2][:200]
+    if not pairs:
+        raise HTTPException(400, "Select at least one clip.")
+    want = body.get("image")
+    if want:
+        from . import overlays
+        try:
+            want = overlays.clean(want)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    _throttle("render:" + ctx.uid(), 20, 600, "That's a lot of re-makes in a short time. Wait a few minutes.")
+    made, busy, gone = 0, 0, 0
+    for jid, cid in pairs:
+        job = jobs.get(str(jid)) if re.fullmatch(r"[\w\-]{8,60}", str(jid)) else None
+        clip = next((c for c in (job or {}).get("clips", []) if c["id"] == str(cid)), None)
+        if not clip or clip.get("status") == "dropped":
+            gone += 1
+            continue
+        if job["status"] in ("queued", "running") or clip.get("status") in ("queued", "rendering"):
+            busy += 1
+            continue
+        try:
+            jobs.request_render(job["id"], clip["id"], {"image": want})
+            made += 1
+        except (ValueError, TypeError):
+            gone += 1
+    ctx.bump()
+    return {"made": made, "busy": busy, "skipped": gone}
+
+
 def _clip_or_404(jid: str, cid: str):
     job = _job_or_404(jid)
     clip = next((c for c in job["clips"] if c["id"] == cid), None)

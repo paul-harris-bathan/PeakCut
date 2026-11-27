@@ -115,6 +115,7 @@ def main() -> int:
                 ("live recording gets past the opening ad, and says when it is stuck", ["tests/test_live_recovery.py"]),
                 ("updating from an older PeakCut: everything is still there", ["tests/test_upgrade.py"]),
                 ("downloads in Desktop\\PeakCut Clips: names, clips.txt, renaming", ["tests/test_clipfolder.py"]),
+                ("quick edit: a picture on chosen clips, where and how big, next to the logo", ["tests/test_overlay.py"]),
                 ("the app icon and the updated message", ["tests/test_app_icon.py"]),
                 ("no working AI key, no clipping", ["tests/test_need_key.py"])]
         for name, args in runs:
