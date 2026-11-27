@@ -6371,22 +6371,24 @@ function spkState(d, t) {
   // what happened to the spike clip nearest this moment (spikes within 30 s are one clip)
   const s = ((d.clips || {}).spikes || []).find(x => Math.abs(x.t - t) < 30);
   if (!s) return null;
+  const going = ["queued", "running"].includes((d.clips || {}).status);
+  if (!s.clip && !going) return null;           // its video was stopped before this spike was made: it can be picked again
   const st = {done: ["ok", "Clip made"], rendering: ["wait", "Making…"], queued: ["wait", "Waiting"], error: ["bad", "Couldn't be made"],
               dropped: ["bad", "Left out"]}[s.clip || "queued"] || ["wait", "Making…"];
-  return {k: st[0], label: st[1], tip: s.error || ""};
+  return {k: st[0], label: st[1], tip: s.error || "", retry: s.clip === "error" && !going};
 }
 function spkList(d) {
   const big = (d.spikes || []).filter(s => s.level === "big"), minor = (d.spikes || []).filter(s => s.level === "minor");
   const keys = d.keys || {}, ready = keys.ai && keys.eleven, cl = d.clips;
   const row = s => {
     const st = spkState(d, s.t);
-    return `<li>${st ? `<span class="spk-st ${st.k}" title="${esc(st.tip || "")}">${esc(st.label)}</span>` : ready ? `<label class="spk-pick"><input type="checkbox" data-spkpick value="${s.t}" aria-label="Clip the spike at ${hms(s.t)}"></label>` : ""}
+    return `<li>${ready && (!st || st.retry) ? `<label class="spk-pick"><input type="checkbox" data-spkpick value="${s.t}" aria-label="${st ? "Try again" : "Clip"} the spike at ${hms(s.t)}"></label>` : ""}${st ? `<span class="spk-st ${st.k}" title="${esc(st.tip || "")}">${esc(st.label)}</span>` : ""}
       <b>${hms(s.t)}</b><span class="sub">${s.times}× normal chat</span></li>`;
   };
   const need = !ready ? `<p class="hq-note bad">${ic("warn")}${!keys.ai ? "Add your AI key" : "Add your ElevenLabs key"} on the AI page to clip spikes. Big spikes are clipped by themselves once both keys are there and you scan again.
       <button class="btn sm" data-act="go" data-v="usage">Open AI page</button></p>` : "";
   const open = cl ? `<div class="row spk-open"><span class="sub">${esc(cl.stage || "")}</span><button class="btn sm" data-act="go" data-v="${cl.creator ? "c:" + esc(cl.creator) : "library"}">${ic("film")}Open the clips</button></div>` : "";
-  const picker = ready && [...big, ...minor].some(s => !spkState(d, s.t)) ? `<button class="btn primary sm" data-act="spkmake">${ic("scissors")}Make clips from ticked spikes</button>` : "";
+  const picker = ready && [...big, ...minor].some(s => { const st = spkState(d, s.t); return !st || st.retry; }) ? `<button class="btn primary sm" data-act="spkmake">${ic("scissors")}Make clips from ticked spikes</button>` : "";
   return `${need}${open}<div class="spk-lists"><section><h3>Big spikes <span class="sub">(${big.length})</span></h3><p class="help">Clipped by themselves when a scan finishes (up to 10, biggest first).</p>
       ${big.length ? `<ul class="spk-ul">${big.map(row).join("")}</ul>` : `<p class="sub">None at this setting.</p>`}</section>
     <section><h3>Worth a look <span class="sub">(${minor.length})</span></h3>${minor.length ? `<ul class="spk-ul">${minor.map(row).join("")}</ul>` : `<p class="sub">None at this setting.</p>`}</section></div>

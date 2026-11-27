@@ -65,10 +65,11 @@ def creator_for(login: str):
 
 
 def job_for(vid: str):
-    """This user's spike video for a VOD, if one was made."""
+    """This user's spike video for a VOD, if one was made: the job itself (list_jobs hands out copies, and a change
+    made to a copy, like putting it back in the line, would never reach the worker)."""
     for j in jobs.list_jobs():
         if j.get("kind") == "spikes" and j.get("vod") == vid:
-            return j
+            return jobs.get(j["id"]) or j
     return None
 
 
@@ -78,20 +79,25 @@ def clip_spikes(scan: dict, times: list, why: str = "picked") -> dict:
     need_keys()
     vid = str(scan["id"])
     job = job_for(vid)
-    if not job:
+    fresh = not job
+    if fresh:             # a new video is born "queued", but is only in the line once enqueue() puts it there (below)
         job = jobs.create({"type": "url", "url": f"https://www.twitch.tv/videos/{vid}", "name": scan.get("title") or ""}, {},
                           enqueue=False, creator=creator_for(scan.get("login")), kind="spikes")
         job.update(vod=vid, spikes=[], title=scan.get("title") or "", uploader=scan.get("streamer") or "",
                    duration=float(scan.get("length") or 0), stage="Waiting")
     known = {round(float(s["t"])): s for s in (scan.get("spikes") or [])}
-    added = 0
     for t in sorted({max(0, int(x)) for x in times}):
-        if any(abs(t - s["t"]) < MERGE for s in job["spikes"]):
+        same = next((s for s in job["spikes"] if abs(t - s["t"]) < MERGE), None)
+        if same:
+            if same.get("clip") == "error":           # picked again after it failed: tried again
+                same.update(clip=None, error=None)
             continue
         k = known.get(t, {})
         job["spikes"].append({"t": t, "times": k.get("times"), "level": k.get("level", "minor"), "why": why})
-        added += 1
-    if added and job.get("status") not in ("queued", "running"):
+    # Spikes still to make start being made unless the video is already in the line or being made (run() picks up
+    # spikes added while it works). A video that was stopped or finished goes back in the line.
+    pending = any(not s.get("clip") for s in job["spikes"])
+    if pending and (fresh or job.get("status") not in ("queued", "running")):
         job.update(status="queued", error=None, stage="Waiting", progress=0.0)
         jobs.enqueue(job)
     else:
@@ -181,20 +187,26 @@ def _prepare(job, spike: dict, n: int) -> dict:
 def run(job):
     """Make a clip for every spike of this video that doesn't have one yet (called by the jobs worker)."""
     t0 = time.time()
-    todo = [s for s in sorted(job.get("spikes") or [], key=lambda s: s["t"]) if not s.get("clip")]
+    pending = lambda: [s for s in sorted(job.get("spikes") or [], key=lambda s: s["t"]) if not s.get("clip")]   # noqa: E731
     jobs._set(job, status="running", error=None, stage="Making spike clips", progress=0.02)
-    made = 0
-    for i, spike in enumerate(todo):
+    made, i = 0, 0
+    while True:          # spikes ticked while this runs are made in this run too
+        todo = pending()
+        if not todo:
+            break
+        spike, total = todo[0], i + len(todo)
         n = max([int(c["id"][4:]) for c in job["clips"] if re.fullmatch(r"clip\d+", c.get("id", ""))] + [0]) + 1
-        jobs._set(job, stage=f"Spike {i + 1} of {len(todo)} at {_hms(spike['t'])}", progress=round(0.05 + 0.9 * i / max(1, len(todo)), 3))
+        jobs._set(job, stage=f"Spike {i + 1} of {total} at {_hms(spike['t'])}", progress=round(0.05 + 0.9 * i / max(1, total), 3))
+        i += 1
         try:
             clip = _prepare(job, spike, n)
         except (eleven.ElevenError, media.YouTubeBlocked) as e:
             spike.update(clip="error", error=str(e)[:300])
             jobs.save(job)
             if isinstance(e, eleven.ElevenError):          # a missing or refused key stops every spike the same way
-                for rest in todo[i + 1:]:
+                for rest in pending():
                     rest.update(clip="error", error=str(e)[:300])
+                jobs.save(job)
                 break
             continue
         except jobs.Cancelled:
@@ -219,7 +231,7 @@ def run(job):
                     job.get("title") or "your VOD", f"/app/creators/{job['creator']}" if job.get("creator") else "/app/videos")
     except Exception:  # noqa: BLE001
         pass
-    creators.log(job.get("creator"), f"Spike clips: {made} made from {len(todo)} spikes in {round(time.time() - t0)}s: {job.get('title')}")
+    creators.log(job.get("creator"), f"Spike clips: {made} made from {i} spikes in {round(time.time() - t0)}s: {job.get('title')}")
 
 
 def _hms(t) -> str:

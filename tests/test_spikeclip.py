@@ -167,8 +167,42 @@ from studio import spikes   # noqa: E402
 with ctx.as_user(u):
     (spikes._file("7777777777")).write_text(json.dumps(dict(scan, id="7777777777", rates=[1.0] * 60, step=10)), encoding="utf-8")
 check("clipping needs at least one spike", c.post("/api/spikes/7777777777/clip", json={"times": []}, headers=H).status_code, 400)
+put = []
+real_put = jobs._q.put
+jobs._q.put = lambda item, user=None: put.append(item)          # the work line, watched instead of run
 r = c.post("/api/spikes/7777777777/clip", json={"times": [450]}, headers=H)
 check("ticked spikes are clipped from the page", (r.status_code, [x["t"] for x in r.json()["clips"]["spikes"]]), (200, [450]))
+jid = r.json()["job"]
+check("...and the new spike video really goes in the work line", put, [("job", jid, None)])
+c.post("/api/spikes/7777777777/clip", json={"times": [300]}, headers=H)
+check("ticking more while it waits doesn't put it in the line twice", (len(put), [s["t"] for s in jobs._jobs[jid]["spikes"]]), (1, [450, 300]))
+j7 = jobs._jobs[jid]
+j7.update(status="error", error="Cancelled by you.", stage="Cancelled")       # stopped before any spike was made
+st = c.get("/api/spikes/7777777777").json()["clips"]
+check("a stopped video's spikes show as not made (so the page lets you pick them again)", (st["status"], [x["clip"] for x in st["spikes"]]), ("error", [None, None]))
+c.post("/api/spikes/7777777777/clip", json={"times": [450]}, headers=H)
+check("picking a stopped spike again puts the video back in the line", (len(put), j7["status"]), (2, "queued"))
+j7["spikes"][0].update(clip="error", error="HTTP 404")
+j7.update(status="done")
+c.post("/api/spikes/7777777777/clip", json={"times": [450]}, headers=H)
+check("picking a failed spike again tries it again", (j7["spikes"][0]["clip"], j7["spikes"][0]["error"], len(put)), (None, None, 3))
+jobs._q.put = real_put
+
+# a spike ticked while the video is being made is made in the same run
+with ctx.as_user(u):
+    j8 = spikeclip.clip_spikes(dict(scan, id="8888888888"), [100])
+    calls = []
+
+    def quick_prepare(job, spike, n):
+        calls.append(spike["t"])
+        if len(calls) == 1:                       # ticked while the first spike is being made
+            job["spikes"].append({"t": 300, "level": "big", "why": "picked"})
+        return {"id": f"clip{n:02d}", "status": "done", "start": spike["t"] - 25, "end": spike["t"] + 20}
+    real_prep, real_render = spikeclip._prepare, jobs.render_one
+    spikeclip._prepare, jobs.render_one = quick_prepare, (lambda job, clip, words: None)
+    spikeclip.run(j8)
+    spikeclip._prepare, jobs.render_one = real_prep, real_render
+check("a spike ticked during the run is made in that run", (calls, [s["clip"] for s in j8["spikes"]], j8["status"]), ([100, 300], ["clip01", "clip02"], "done"))
 check("the scan says which keys are set", c.get("/api/spikes/7777777777").json()["keys"], {"ai": True, "eleven": True})
 check("clipping from another website is refused", c.post("/api/spikes/7777777777/clip", json={"times": [100]}, headers={"Origin": "https://evil.example"}).status_code, 403)
 check("the key can be removed", (c.delete("/api/eleven/key", headers=H).json()["has_key"], eleven.key()), (False, ""))
