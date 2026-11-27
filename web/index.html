@@ -6225,7 +6225,7 @@ function drawSpikes() {
     : `<section class="set-sec"><div class="spk-title"><div><h2>${esc(d.title || "Twitch video")}</h2><p class="sub">${esc(d.streamer)} · ${hms(d.length)} · <a href="https://www.twitch.tv/videos/${esc(d.id)}" target="_blank" rel="noopener">Open on Twitch</a></p></div>
         <button class="btn sm icon ghost" data-act="spkdel" data-k="${esc(d.id)}" title="Remove this scan" aria-label="Remove this scan">${ic("trash")}</button></div>
         ${spkGraph(d)}
-        <label class="spk-sens">How picky<input type="range" id="spks" min="0.5" max="2" step="0.1" value="${SPK.s}"><span>${SPK.s <= 0.8 ? "More spikes" : SPK.s >= 1.3 ? "Fewer spikes" : "Normal"} · big ${(5 * SPK.s).toFixed(1)}×, worth a look ${(2.5 * SPK.s).toFixed(1)}×</span></label>
+        <label class="spk-sens">How picky<input type="range" id="spks" min="0.5" max="2" step="0.1" value="${SPK.s}"><span>${SPK.s <= 0.8 ? "More spikes" : SPK.s >= 1.3 ? "Fewer spikes" : "Normal"} · big ${(3 * SPK.s).toFixed(1)}×, worth a look ${(2.5 * SPK.s).toFixed(1)}×</span></label>
         ${spkList(d)}</section>`;
   const others = SPK.list.filter(x => x.id !== SPK.vid);
   const past = others.length ? `<section class="set-sec"><h3>Scanned before</h3><ul class="spk-ul">${others.map(x => `<li><button class="btn sm ghost" data-act="spkopen" data-k="${esc(x.id)}">${esc(x.title || x.id)}</button><span class="sub">${esc(x.streamer || "")}${x.length ? " · " + hms(x.length) : ""}${x.status === "scanning" ? " · reading chat…" : x.status === "error" ? " · failed" : ""}</span></li>`).join("")}</ul></section>` : "";
