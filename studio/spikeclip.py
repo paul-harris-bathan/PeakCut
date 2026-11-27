@@ -7,8 +7,9 @@ caption and hashtags. The clip then goes through PeakCut's usual making (studio/
 words are proofread by the AI and drawn as captions, in the chosen style, on the graphics card, then checked.
 
 Spike clips belong to one PeakCut video per VOD (kind "spikes"), so they show, play, post, download and can be made
-again like any other clips. Spikes at BIG or more are clipped by themselves when a scan finishes (at most AUTO_MAX,
-biggest first); any other spike is clipped when the person ticks it."""
+again like any other clips. Every spike, big or small, is clipped only when the person ticks it. With
+PEAKCUT_SPIKE_AUTO_MAX set above 0, that many big spikes are instead clipped by themselves when a scan finishes
+(biggest first)."""
 from __future__ import annotations
 
 import re
@@ -21,7 +22,7 @@ BEFORE = 25                  # seconds of video before the spike: people type in
 AFTER_MIN, AFTER_MAX = 15, 25  # the clip ends this long after the spike; the AI picks where, inside these
 HEAR_AFTER = 30              # seconds after the spike that ElevenLabs hears, so the AI can choose the end
 MERGE = 30                   # spikes closer than this are one clip
-AUTO_MAX = int(config.env("PEAKCUT_SPIKE_AUTO_MAX", "10"))
+AUTO_MAX = int(config.env("PEAKCUT_SPIKE_AUTO_MAX", "0"))   # big spikes clipped by themselves (0: none, every one is ticked)
 
 PROMPT = """You are a clip editor for short vertical videos (TikTok, Shorts, Reels) from a live stream.
 Chat went wild at {spike:.0f}s in the transcript below (each line starts with [seconds]); viewers react a few

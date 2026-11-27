@@ -152,7 +152,9 @@ with ctx.as_user(u):
     spikeclip.run(job2)
     check("a refused ElevenLabs key: every spike says so, nothing is made", [(x["clip"], "refused" in x["error"]) for x in job2["spikes"]], [("error", True), ("error", True)])
 
-    # big spikes by themselves, biggest first, at most AUTO_MAX
+    # big spikes wait for a tick like any other, unless PEAKCUT_SPIKE_AUTO_MAX is set
+    check("big spikes are not clipped by themselves", (spikeclip.AUTO_MAX, spikeclip.auto(dict(scan, id="4444444444")), spikeclip.job_for("4444444444")), (0, None, None))
+    # with the setting: biggest first, at most AUTO_MAX
     spikeclip.AUTO_MAX = 1
     scan3 = dict(scan, id="5555555555")
     j3 = spikeclip.auto(scan3)
