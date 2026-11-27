@@ -90,6 +90,7 @@ def main() -> int:
                 ("clips on the graphics card, with a fallback", ["tests/test_encoders.py"]),
                 ("each clip checked: no sound, quiet, crackling, black or frozen", ["tests/test_clipcheck.py"]),
                 ("chat spikes in a Twitch VOD: read, judged against the stream's normal, kept per user", ["tests/test_spikes.py"]),
+                ("spike clips: ElevenLabs words, the AI's cut, big spikes by themselves", ["tests/test_spikeclip.py"]),
                 ("the streamer's cam found by the AI on real frames, checked", ["tests/test_facecam_ai.py"]),
                 ("admin account list, any size", ["tests/test_admin_users.py"]),
                 ("feedback: seen on view, removable", ["tests/test_feedback.py"]),
