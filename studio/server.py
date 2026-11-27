@@ -2120,6 +2120,21 @@ def list_creators():
     return _creator_rows()
 
 
+@app.get("/api/creators/{cid}/vods")
+def creator_vods(cid: str):
+    """The streamer's recent Twitch VODs, for "Clip this" and "Find spikes" on their page."""
+    c = creators.get(cid)
+    if not c:
+        raise HTTPException(404, "No such streamer")
+    login = discover.twitch_login(str((c.get("channels") or {}).get("twitch") or c.get("channel") or ""))
+    if not login:
+        return {"login": "", "vods": []}
+    try:
+        return {"login": login, "vods": discover.recent_vods(login)}
+    except Exception:  # noqa: BLE001 - Twitch didn't answer
+        raise HTTPException(502, "Twitch didn't answer. Try again in a minute.")
+
+
 @app.post("/api/creators")
 def new_creator(body: dict = Body(...)):
     _channel_ok(body)

@@ -449,3 +449,38 @@ def _search(q: str) -> list:
         except Exception:  # noqa: BLE001
             pass
     return out[:9]
+
+
+# ---------------------------------------------------------------- a streamer's recent Twitch VODs (their page)
+VODS_FOR = 300          # seconds a streamer's VOD list is reused
+_Q_VODS = ("query($l:String!,$n:Int){user(login:$l){videos(first:$n,type:ARCHIVE,sort:TIME){edges{node{"
+           "id title lengthSeconds createdAt previewThumbnailURL(width:320,height:180)}}}}}")
+
+
+def twitch_login(channel: str) -> str:
+    """The login in a Twitch channel link (twitch.tv/caseoh_ -> caseoh_); '' if it isn't one."""
+    m = re.search(r"twitch\.tv/([A-Za-z0-9_]{2,25})(?:[/?#]|$)", channel or "")
+    return m.group(1).lower() if m and m.group(1).lower() not in ("videos", "directory", "p", "settings") else ""
+
+
+def recent_vods(login: str, n: int = 12) -> list:
+    """A Twitch channel's latest past broadcasts, newest first: id, title, length (s), when, picture, link.
+    Twitch keeps them 7 to 60 days, so older streams aren't listed."""
+    login = (login or "").lower()
+    if not re.fullmatch(r"[a-z0-9_]{2,25}", login):
+        return []
+
+    def fetch():
+        user = (_gql(_Q_VODS, {"l": login, "n": max(1, min(30, n))}) or {}).get("user") or {}
+        out = []
+        for e in ((user.get("videos") or {}).get("edges") or []):
+            v = e.get("node") or {}
+            if not v.get("id"):
+                continue
+            thumb = str(v.get("previewThumbnailURL") or "")
+            out.append({"id": str(v["id"]), "title": v.get("title") or "", "length": int(v.get("lengthSeconds") or 0),
+                        "created": v.get("createdAt") or "", "pic": pic(thumb, 320) if "404_processing" not in thumb else "",
+                        "url": f"https://www.twitch.tv/videos/{v['id']}"})
+        return out
+
+    return _shared(f"vods:{login}:{n}", VODS_FOR, fetch)
