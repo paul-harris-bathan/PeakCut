@@ -111,7 +111,8 @@ on_clip_ready: list = []   # callbacks (job, clip), run once when a clip first f
 DEFAULTS = {"max_clips": 6, "min_len": 15, "max_len": 60, "style": "bounce", "layout": "blur", "quality": 720,
             "range_start": None, "range_end": None, "captions": True, "hook_text": "", "description_text": "",
             "lang": "en",        # lang: the language spoken
-            "template": "", "cap_lang": ""}   # cap_lang: the captions' language ("" is the language spoken)
+            "template": "", "cap_lang": "",   # cap_lang: the captions' language ("" is the language spoken)
+            "folder": ""}        # folder: the name of its folder in Desktop\PeakCut Clips ("" is the video's title)
 
 
 LIMITS = {"max_clips": (1, 20), "min_len": (5, 120), "max_len": (10, 180), "quality": (360, 2160)}
@@ -144,6 +145,11 @@ def clean_options(options) -> dict:
             v = str(v)[:12]                      # checked when the video is created (templates.pick)
         elif k == "cap_lang":                    # the captions' language: "" is the language spoken
             v = v if v in brain.CAP_LANGS else ""
+        elif k == "folder":                      # its folder in Desktop\PeakCut Clips, named before clipping
+            from . import clipfolder
+            v = clipfolder.safe_name(v)
+            if not v:
+                continue
         else:                                    # range_start, range_end: seconds into the video
             v = float(v)
             if not math.isfinite(v) or v < 0:
