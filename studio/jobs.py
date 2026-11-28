@@ -539,9 +539,16 @@ def request_render(jid, cid, changes: dict):
     for k in ("start", "end"):
         if k in changes:
             new[k] = round(float(changes[k]), 2)
-    if "src_offset" in clip:  # live clip: can only move inside the saved piece of stream
-        new["start"] = max(new["start"], clip["src_offset"])
-        new["end"] = min(new["end"], clip["src_end"])
+    if "src_offset" in clip:  # a clip made from its own piece of the video (a live clip, a spike clip, a long video)
+        src = job.get("source") or {}
+        outside = new["start"] < clip["src_offset"] - 0.05 or new["end"] > clip["src_end"] + 0.05
+        if outside and src.get("type") == "url" and src.get("url") and job.get("kind") != "live":
+            new["refetch"] = True            # made longer than its piece: a wider piece is fetched from the video first
+            if job.get("duration"):
+                new["end"] = min(new["end"], float(job["duration"]))
+        else:                                # a live recording: only what was saved of the stream
+            new["start"] = max(new["start"], clip["src_offset"])
+            new["end"] = min(new["end"], clip["src_end"])
     if not (math.isfinite(new["start"]) and math.isfinite(new["end"])) or new["start"] < 0:
         raise ValueError("Those times aren't valid.")
     if "src_offset" in clip and new["end"] - new["start"] < 3 and "start" not in changes and "end" not in changes:
@@ -876,7 +883,9 @@ def render_one(job, clip, words):
     clip["status"] = "rendering"
     save(job)
     try:
-        if not clip.get("src") and not job.get("source_path"):
+        if clip.get("refetch"):          # made longer than its piece of the video: fetch the wider piece
+            _refetch(job, clip)
+        elif not clip.get("src") and not job.get("source_path"):
             _piece_again(job, clip)
         off = clip.get("src_offset", 0.0)
         src = Path(clip["src"]) if clip.get("src") else Path(job["source_path"])
@@ -1247,6 +1256,32 @@ def _piece_again(job, clip):
     clip["end"] = min(clip["end"], clip["src_end"])
     job.setdefault("width", meta["width"])
     job.setdefault("height", meta["height"])
+
+
+def _refetch(job, clip):
+    """A clip made longer than the piece of the video it has: the wider piece is fetched (and, for a spike clip, heard
+    again by ElevenLabs so the new part has captions too). If that fails, the old piece is put back."""
+    old = {k: clip.get(k) for k in ("src", "src_offset", "src_end")}
+    keep = Path(old["src"]) if old["src"] else None
+    bak = keep.with_name(keep.stem + ".old" + keep.suffix) if keep else None
+    if keep and keep.is_file():
+        keep.replace(bak)
+    for k in old:
+        clip.pop(k, None)
+    try:
+        _piece_again(job, clip)
+        if job.get("kind") == "spikes":
+            from . import spikeclip
+            spikeclip.rehear(job, clip)
+    except Exception:
+        if bak and bak.is_file():
+            bak.replace(keep)
+        clip.update({k: v for k, v in old.items() if v is not None})
+        clip.pop("refetch", None)
+        raise
+    clip.pop("refetch", None)
+    if bak:
+        bak.unlink(missing_ok=True)
 
 
 PIECE_TRIES = (0, 20, 60)   # seconds waited before each try at a clip's stretch

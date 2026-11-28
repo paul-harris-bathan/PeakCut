@@ -122,6 +122,7 @@ def main() -> int:
                 ("downloads in Desktop\\PeakCut Clips: names, clips.txt, renaming", ["tests/test_clipfolder.py"]),
                 ("quick edit: a picture on chosen clips, where and how big, next to the logo", ["tests/test_overlay.py"]),
                 ("on-screen text: heading and captions corrected by hand, shown exactly", ["tests/test_screen_text.py"]),
+                ("clip length by hand: start and end moved, more fetched past the piece, old piece kept if that fails", ["tests/test_clip_length.py"]),
                 ("picture adjust: exposure, brightness, colour, sharpness, cam and main apart, live preview", ["tests/test_adjust.py"]),
                 ("chat box and Custom layout: placed by hand, background out, see-through, rounded, own picture settings", ["tests/test_chat_box.py"]),
                 ("the app icon and the updated message", ["tests/test_app_icon.py"]),
