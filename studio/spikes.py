@@ -261,8 +261,14 @@ def all_scans() -> list:
     return sorted(out, key=lambda d: -float(d.get("scanned") or d.get("started") or 0))
 
 
-def start(url: str) -> dict:
-    """Begin scanning a Twitch VOD's chat in the background. Returns the VOD's details straight away."""
+def clean_name(name) -> str:
+    """A name the person gave the VOD (shown instead of Twitch's title): one line, at most 100 characters."""
+    return re.sub(r"\s+", " ", str(name or "")).strip()[:100]
+
+
+def start(url: str, name: str = "") -> dict:
+    """Begin scanning a Twitch VOD's chat in the background. Returns the VOD's details straight away. `name`: what
+    to call it in PeakCut (its spike clips' video too) instead of the stream's Twitch title."""
     vid = vod_id(url)
     if not vid:
         raise ValueError("Paste a Twitch VOD link, like https://www.twitch.tv/videos/1234567890")
@@ -271,6 +277,8 @@ def start(url: str) -> dict:
         if (u, vid) in _scans and _scans[(u, vid)].get("status") == "scanning":
             return dict(_scans[(u, vid)])
     info = vod_info(vid)
+    if clean_name(name):
+        info["name"] = clean_name(name)
     live = dict(info, status="scanning", progress=0.0, error="", started=time.time())
     _scans[(u, vid)] = live
 

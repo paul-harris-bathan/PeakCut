@@ -88,10 +88,11 @@ def clip_spikes(scan: dict, times: list, why: str = "picked", template: str | No
     job = job_for(vid)
     fresh = not job
     if fresh:             # a new video is born "queued", but is only in the line once enqueue() puts it there (below)
-        job = jobs.create({"type": "url", "url": f"https://www.twitch.tv/videos/{vid}", "name": scan.get("title") or ""},
+        named = scan.get("name") or scan.get("title") or ""     # the name given before the scan, else Twitch's title
+        job = jobs.create({"type": "url", "url": f"https://www.twitch.tv/videos/{vid}", "name": named},
                           {"template": tid} if tid else {},
                           enqueue=False, creator=creator_for(scan.get("login")), kind="spikes")
-        job.update(vod=vid, spikes=[], title=scan.get("title") or "", uploader=scan.get("streamer") or "",
+        job.update(vod=vid, spikes=[], title=named, uploader=scan.get("streamer") or "",
                    duration=float(scan.get("length") or 0), stage="Waiting")
     if scan.get("muted") is not None:
         job["muted"] = scan["muted"]                  # Twitch's muted stretches, checked again before each spike is made
@@ -269,6 +270,35 @@ def run(job):
 def _hms(t) -> str:
     t = int(t)
     return f"{t // 3600}:{t % 3600 // 60:02d}:{t % 60:02d}"
+
+
+def vod_jobs(vid: str) -> list:
+    """This user's videos made from a Twitch VOD: its spike video, and the VOD clipped whole ("Clip this")."""
+    out = []
+    for j in jobs.list_jobs():
+        url = str((j.get("source") or {}).get("url") or "")
+        if (j.get("kind") == "spikes" and j.get("vod") == vid) or re.search(r"/videos/" + re.escape(vid) + r"(?:\D|$)", url):
+            out.append(jobs.get(j["id"]) or j)
+    return out
+
+
+def history(vid: str) -> list:
+    """Every clip made from a VOD, by where it is in the stream: its time, a short title, when it was made, its style."""
+    out = []
+    for j in vod_jobs(vid):
+        for c in j.get("clips") or []:
+            if c.get("status") == "dropped":
+                continue
+            out.append({"job": j["id"], "clip": c["id"], "t": round(float(c.get("start") or 0)), "spike": c.get("spike"),
+                        "len": round(float(c.get("end") or 0) - float(c.get("start") or 0)),
+                        "title": c.get("title") or c.get("hook") or "", "status": c.get("status"), "made": c.get("made_at"),
+                        "template": c.get("template") or "", "kind": j.get("kind")})
+    return sorted(out, key=lambda x: x["t"])
+
+
+def clip_count(vid: str) -> int:
+    """How many finished clips were made from a VOD."""
+    return sum(1 for x in history(vid) if x["status"] == "done")
 
 
 def summary(vid: str) -> dict | None:

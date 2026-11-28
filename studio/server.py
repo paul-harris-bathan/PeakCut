@@ -1374,13 +1374,29 @@ def overlay_file(name: str):
                         headers={"Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff"})
 
 
+def _picked_clips(body: dict) -> list:
+    pairs = [p for p in (body.get("clips") or []) if isinstance(p, list) and len(p) == 2][:200]
+    if not pairs:
+        raise HTTPException(400, "Select at least one clip.")
+    return pairs
+
+
+@app.post("/api/clips/style")
+def clips_style(body: dict = Body(...)):
+    """Make these clips again in another style. Clips still being made are skipped and counted."""
+    pairs = _picked_clips(body)
+    t = templates.get(str(body.get("template") or "")[:12])
+    if not t:
+        raise HTTPException(400, "Pick a style.")
+    _throttle("render:" + ctx.uid(), 20, 600, "That's a lot of re-makes in a short time. Wait a few minutes.")
+    return _remake_many(pairs, {"template": t["id"]})
+
+
 @app.post("/api/clips/image")
 def clips_image(body: dict = Body(...)):
     """Put a picture on these clips (or take it off, with "image": null) and make each again. Clips still being made
     are skipped and counted."""
-    pairs = [p for p in (body.get("clips") or []) if isinstance(p, list) and len(p) == 2][:200]
-    if not pairs:
-        raise HTTPException(400, "Select at least one clip.")
+    pairs = _picked_clips(body)
     want = body.get("image")
     if want:
         from . import overlays
@@ -1389,6 +1405,11 @@ def clips_image(body: dict = Body(...)):
         except ValueError as e:
             raise HTTPException(400, str(e))
     _throttle("render:" + ctx.uid(), 20, 600, "That's a lot of re-makes in a short time. Wait a few minutes.")
+    return _remake_many(pairs, {"image": want})
+
+
+def _remake_many(pairs: list, changes: dict) -> dict:
+    """Make each of these clips again with the same change; those being made, or gone, are counted, not changed."""
     made, busy, gone = 0, 0, 0
     for jid, cid in pairs:
         job = jobs.get(str(jid)) if re.fullmatch(r"[\w\-]{8,60}", str(jid)) else None
@@ -1400,7 +1421,7 @@ def clips_image(body: dict = Body(...)):
             busy += 1
             continue
         try:
-            jobs.request_render(job["id"], clip["id"], {"image": want})
+            jobs.request_render(job["id"], clip["id"], dict(changes))
             made += 1
         except (ValueError, TypeError):
             gone += 1
@@ -2246,13 +2267,16 @@ def campaign_logo_file(cid: str, key: str):
 # ---------------------------------------------------------------- spike mode: where chat went wild in a Twitch VOD
 @app.get("/api/spikes")
 def spike_scans():
-    return spikes.all_scans()
+    out = spikes.all_scans()
+    for s in out:                                    # VODs already clipped are marked, with how many clips
+        s["clipped"] = spikeclip.clip_count(str(s.get("id") or ""))
+    return out
 
 
 @app.post("/api/spikes")
 def spike_start(body: dict = Body(...)):
     try:
-        return spikes.start(str(body.get("url") or ""))
+        return spikes.start(str(body.get("url") or ""), str(body.get("name") or ""))
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception:  # noqa: BLE001 - Twitch didn't answer
@@ -2268,6 +2292,7 @@ def spike_scan(vid: str, s: float = 1.0):
     if not got:
         raise HTTPException(404, "No scan of that video.")
     got["clips"] = spikeclip.summary(vid)            # the spike clips made from it, and what happened to each spike
+    got["history"] = spikeclip.history(vid)          # every clip made from this VOD (spikes or clipped whole)
     got["keys"] = spikeclip.keys_state()
     return got
 
