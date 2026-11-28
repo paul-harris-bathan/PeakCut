@@ -1392,6 +1392,17 @@ def clips_style(body: dict = Body(...)):
     return _remake_many(pairs, {"template": t["id"]})
 
 
+@app.post("/api/clips/adjust")
+def clips_adjust(body: dict = Body(...)):
+    """Make these clips again with exactly these picture settings ("adjust": null: each back to its style's). Clips
+    still being made are skipped and counted."""
+    pairs = _picked_clips(body)
+    if "adjust" not in body or not (body["adjust"] is None or isinstance(body["adjust"], dict)):
+        raise HTTPException(400, "Nothing to change.")
+    _throttle("render:" + ctx.uid(), 20, 600, "That's a lot of re-makes in a short time. Wait a few minutes.")
+    return _remake_many(pairs, {"adjust": body["adjust"]})
+
+
 @app.post("/api/clips/image")
 def clips_image(body: dict = Body(...)):
     """Put a picture on these clips (or take it off, with "image": null) and make each again. Clips still being made

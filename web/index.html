@@ -4332,68 +4332,80 @@ async function screenDialog(jid, cid) {
 // ---- Adjust: the clip's picture, main and cam apart, with a live preview frame made by the server
 const ADJ_LABEL = {exposure: "Exposure", brightness: "Brightness", contrast: "Contrast", saturation: "Saturation", temp: "Warm / cool",
                    sharpen: "Sharpen", shadows: "Shadows", highlights: "Highlights"};
-async function adjustDialog(jid, cid) {
+async function adjustDialog(jid, cid, many) {
+  // one clip (jid, cid), or many: [[jid, cid], ...] that all get exactly these settings. The preview is of one of them.
+  const targets = many && many.length ? many : [[jid, cid]], bulk = targets.length > 1;
+  const url = ([j, c]) => `/api/jobs/${encodeURIComponent(j)}/clips/${encodeURIComponent(c)}/adjust`;
   let info;
-  const base = `/api/jobs/${encodeURIComponent(jid)}/clips/${encodeURIComponent(cid)}/adjust`;
-  try { info = await api(base); } catch (err) { return toast(err.message, "bad"); }
-  const cl = jobOf(jid)?.clips.find(x => x.id === cid), len = cl ? Math.max(1, cl.end - cl.start) : 30;
-  const st = {adj: JSON.parse(JSON.stringify(info.adjust)), part: "main", at: len * 0.4, before: false, seq: 0, timer: 0};
-  const zero = () => Object.fromEntries(Object.keys(info.adjust).map(p => [p, Object.fromEntries(info.keys.map(k => [k, 0]))]));
+  try { info = await api(url(targets[0])); } catch (err) { return toast(err.message, "bad"); }
+  const lenOf = ([j, c]) => { const cl = jobOf(j)?.clips.find(x => x.id === c); return cl ? Math.max(1, cl.end - cl.start) : 30; };
+  const st = {adj: JSON.parse(JSON.stringify(info.adjust)), part: "main", i: 0, at: lenOf(targets[0]) * 0.4, before: false, seq: 0, timer: 0};
+  const zero = () => Object.fromEntries(["main", "cam"].map(p => [p, Object.fromEntries(info.keys.map(k => [k, 0]))]));
+  const showCam = bulk || info.cam;            // many clips: the cam settings go to those that have a cam
   const d = $("#formdlg");
   const sliders = () => info.keys.map(k => { const v = st.adj[st.part][k];
     return `<label class="adj-row"><span>${ADJ_LABEL[k] || k}</span><input type="range" data-adj="${k}" min="${k === "sharpen" ? 0 : -100}" max="100" step="1" value="${v}" aria-label="${ADJ_LABEL[k] || k}"><output class="${v ? "on" : ""}">${v > 0 && k !== "sharpen" ? "+" : ""}${v}</output></label>`; }).join("");
   const draw = () => {
     d.querySelector("#adjsl").innerHTML = sliders();
     d.querySelectorAll("[data-adjpart]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.adjpart === st.part)));
+    const w = d.querySelector("#adjwhich"); if (w) w.textContent = `Preview: clip ${st.i + 1} of ${targets.length}`;
   };
   const preview = () => {                       // asked for once the sliders stop for a moment; older answers are dropped
     clearTimeout(st.timer);
     st.timer = setTimeout(async () => {
       const n = ++st.seq, busy = d.querySelector(".adj-busy"); if (busy) busy.hidden = false;
       try {
-        const r = await fetch(base + "/preview", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({adjust: st.before ? zero() : st.adj, at: st.at})});
+        const r = await fetch(url(targets[st.i]) + "/preview", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({adjust: st.before ? zero() : st.adj, at: st.at})});
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "Couldn't make a preview.");
-        const url = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); r.blob().then(b => fr.readAsDataURL(b)); });
-        if (n === st.seq && d.open) d.querySelector("#adjimg").src = url;
+        const src = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); r.blob().then(b => fr.readAsDataURL(b)); });
+        if (n === st.seq && d.open) d.querySelector("#adjimg").src = src;
       } catch (err) { if (n === st.seq) toast(err.message, "bad"); }
       finally { if (n === st.seq && busy) busy.hidden = true; }
     }, 160);
   };
-  d.innerHTML = `<form method="dialog" class="dlg adj-dlg"><h2>Adjust the picture</h2>
-    <p class="help">Move the sliders and the picture updates. ${info.cam ? "The cam and the main picture are adjusted apart. " : ""}The clip is made again when you apply.${info.own ? "" : " These start from the clip's style."}</p>
+  d.innerHTML = `<form method="dialog" class="dlg adj-dlg"><h2>${bulk ? `Adjust ${targets.length} clips` : "Adjust the picture"}</h2>
+    <p class="help">${bulk ? `All ${targets.length} clips get exactly these settings, replacing what each had. The cam settings go to the clips that have a cam. ` : `Move the sliders and the picture updates. ${info.cam ? "The cam and the main picture are adjusted apart. " : ""}`}The clip${bulk ? "s are" : " is"} made again when you apply.${bulk || info.own ? "" : " These start from the clip's style."}</p>
     <div class="adj-body"><div><div class="adj-pv"><img id="adjimg" alt="Preview of the clip"><span class="adj-busy">Updating…</span></div>
-      <label class="adj-time">Frame<input type="range" id="adjat" min="0" max="${len.toFixed(2)}" step="0.1" value="${st.at.toFixed(2)}" aria-label="Which moment of the clip to preview"></label></div>
-      <div>${info.cam ? `<div class="seg" role="group" aria-label="Part of the picture" style="margin-bottom:10px"><button type="button" data-adjpart="main" aria-pressed="true">Main picture</button><button type="button" data-adjpart="cam" aria-pressed="false">Cam</button></div>` : ""}
+      ${bulk ? `<div class="row adj-time" style="grid-template-columns:auto 1fr auto"><button type="button" class="btn sm icon ghost" data-adjclip="-1" aria-label="Previous clip">‹</button><span id="adjwhich" style="text-align:center"></span><button type="button" class="btn sm icon ghost" data-adjclip="1" aria-label="Next clip">›</button></div>` : ""}
+      <label class="adj-time">Frame<input type="range" id="adjat" min="0" max="${lenOf(targets[0]).toFixed(2)}" step="0.1" value="${st.at.toFixed(2)}" aria-label="Which moment of the clip to preview"></label></div>
+      <div>${showCam ? `<div class="seg" role="group" aria-label="Part of the picture" style="margin-bottom:10px"><button type="button" data-adjpart="main" aria-pressed="true">Main picture</button><button type="button" data-adjpart="cam" aria-pressed="false">Cam</button></div>` : ""}
         <div class="adj-sl" id="adjsl"></div>
-        <div class="adj-tools"><button type="button" class="btn sm ghost" data-adjtool="part">Reset ${info.cam ? "this part" : "all"}</button>
-          ${info.own ? `<button type="button" class="btn sm ghost" data-adjtool="style">Back to the style's</button>` : ""}
+        <div class="adj-tools"><button type="button" class="btn sm ghost" data-adjtool="part">Reset ${showCam ? "this part" : "all"}</button>
+          ${bulk || info.own ? `<button type="button" class="btn sm ghost" data-adjtool="style">Back to the style's</button>` : ""}
           <label class="row" style="gap:6px;font-size:13px"><input type="checkbox" id="adjbefore">Show the original</label></div></div></div>
-    <div class="dlg-foot"><span class="grow"></span><button class="btn" value="no">Cancel</button><button class="btn primary" value="yes">${ic("scissors")}Apply and re-make</button></div></form>`;
+    <div class="dlg-foot"><span class="grow"></span><button class="btn" value="no">Cancel</button><button class="btn primary" value="yes">${ic("scissors")}Apply${bulk ? ` to ${targets.length} clips` : " and re-make"}</button></div></form>`;
   draw();
   d.oninput = e => {
     const t = e.target;
-    if (t.dataset.adj) { const v = Number(t.value); st.adj[st.part][t.dataset.adj] = v; const o = t.nextElementSibling; o.textContent = (v > 0 && t.dataset.adj !== "sharpen" ? "+" : "") + v; o.classList.toggle("on", !!v); preview(); }
+    if (t.dataset.adj) { const v = Number(t.value); st.adj[st.part][t.dataset.adj] = v; st.useStyle = false; const o = t.nextElementSibling; o.textContent = (v > 0 && t.dataset.adj !== "sharpen" ? "+" : "") + v; o.classList.toggle("on", !!v); preview(); }
     if (t.id === "adjat") { st.at = Number(t.value); preview(); }
   };
   d.onchange = e => { if (e.target.id === "adjbefore") { st.before = e.target.checked; preview(); } };
   d.onclick = e => {
     const pb = e.target.closest("[data-adjpart]"); if (pb) { st.part = pb.dataset.adjpart; draw(); return; }
+    const cb = e.target.closest("[data-adjclip]");
+    if (cb) { st.i = (st.i + Number(cb.dataset.adjclip) + targets.length) % targets.length; const L = lenOf(targets[st.i]);
+      const at = d.querySelector("#adjat"); at.max = L.toFixed(2); st.at = Math.min(st.at, L - 0.1); at.value = st.at; draw(); preview(); return; }
     const tb = e.target.closest("[data-adjtool]"); if (!tb) return;
-    if (tb.dataset.adjtool === "part") { st.adj[st.part] = zero()[st.part]; if (!info.cam) st.adj = zero(); }
-    if (tb.dataset.adjtool === "style") { st.adj = JSON.parse(JSON.stringify(info.style)); st.useStyle = true; }
+    if (tb.dataset.adjtool === "part") { st.adj[st.part] = zero()[st.part]; if (!showCam) st.adj = zero(); st.useStyle = false; }
+    if (tb.dataset.adjtool === "style") { st.adj = bulk ? zero() : JSON.parse(JSON.stringify(info.style)); st.useStyle = true; }
     draw(); preview();
   };
   d.returnValue = "no";
   d.onclose = async () => {
     d.oninput = d.onchange = d.onclick = null; clearTimeout(st.timer); st.seq++;
     if (d.returnValue !== "yes") return;
-    const same = JSON.stringify(st.adj) === JSON.stringify(info.adjust);
-    if (same && !st.useStyle) return toast("Nothing was changed.");
-    const styleSame = JSON.stringify(st.adj) === JSON.stringify(info.style);
     try {
-      await send(base, {adjust: st.useStyle && styleSame ? null : st.adj}, "PUT");
-      toast("Applied. The clip is being made again.", "ok");
-      await tick(); render();
+      if (bulk) {
+        const r = await send("/api/clips/adjust", {clips: targets, adjust: st.useStyle ? null : st.adj});
+        toast(`Making ${r.made} clip${r.made === 1 ? "" : "s"} again${st.useStyle ? " with their style's settings" : " with these settings"}.` + (r.busy ? ` ${r.busy} still being made, left as they are.` : ""), "ok");
+      } else {
+        const same = JSON.stringify(st.adj) === JSON.stringify(info.adjust);
+        if (same && !st.useStyle) return toast("Nothing was changed.");
+        await send(url(targets[0]), {adjust: st.useStyle ? null : st.adj}, "PUT");
+        toast("Applied. The clip is being made again.", "ok");
+      }
+      await tick(); render(); if (S.view === "spikes") spkLoad();
     } catch (err) { toast(err.message, "bad"); }
   };
   d.showModal(); preview();
@@ -4494,6 +4506,9 @@ function drawSelBar() {
     <button class="btn sm" data-act="selall">Select all</button>
     <button class="btn sm primary" data-act="seldl" ${dl ? "" : "disabled"}>${ic("down")}Download${dl ? ` ${dl} clip${dl === 1 ? "" : "s"}` : ""}</button>
     <button class="btn sm" data-act="selimage" ${dl ? "" : "disabled"} title="Put a picture on the selected clips">${ic("plus")}Add image</button>
+    <button class="btn sm" data-act="selstyle" ${dl ? "" : "disabled"} title="Make the selected clips again in another style">${ic("sliders")}Change style</button>
+    <button class="btn sm" data-act="seladjust" ${dl ? "" : "disabled"} title="Exposure, brightness, colour and sharpness for the selected clips">${ic("sliders")}Adjust</button>
+    <span style="display:none">${tplAll().length ? tplChip("sel_tpl", "", {made: true}) : ""}</span>
     <button class="btn sm danger" data-act="seldel">${ic("trash")}Delete</button>
     <button class="btn sm" data-act="selclear">Cancel</button>`);
 }
@@ -6535,9 +6550,20 @@ function spkHist(d) {
   return `<section class="set-sec"><h3>Clips from this VOD <span class="sub">(${h.length})</span></h3><p class="help">Every clip made from this stream, by where it is in the VOD. Tick clips, pick a style, and they are made again in it.</p>
     ${done.length ? `<div class="spk-histbar"><label class="row" style="gap:6px"><input type="checkbox" data-spkhistall ${n && n === done.length ? "checked" : ""}>Select all</label>
       ${tplAll().length ? tplChip("spk_restyle", SPK.restyle && tplOf(SPK.restyle) ? SPK.restyle : S.tpl.default) : ""}
-      <button class="btn sm primary" data-act="spkrestyle"${n ? "" : " disabled"}>${ic("sliders")}Change style${n ? ` of ${n} clip${n > 1 ? "s" : ""}` : ""}</button></div>` : ""}
+      <button class="btn sm primary" data-act="spkrestyle"${n ? "" : " disabled"}>${ic("sliders")}Change style${n ? ` of ${n} clip${n > 1 ? "s" : ""}` : ""}</button>
+      <button class="btn sm" data-act="spkadjust"${n ? "" : " disabled"}>${ic("sliders")}Adjust${n ? ` ${n} clip${n > 1 ? "s" : ""}` : ""}</button></div>` : ""}
     <ul class="spk-hist">${h.map(row).join("")}</ul></section>`;
 }
+document.addEventListener("change", async e => {        // a style picked from the selection bar: the selected clips in it
+  if (e.target.id !== "sel_tpl" || !e.target.value) return;
+  const clips = selClips().map(k => { const i = k.lastIndexOf("."); return [k.slice(0, i), k.slice(i + 1)]; }), template = e.target.value;
+  if (!clips.length) return;
+  try {
+    const r = await send("/api/clips/style", {clips, template});
+    toast(`Making ${r.made} clip${r.made === 1 ? "" : "s"} again in ${tplOf(template)?.name || "that style"}.` + (r.busy ? ` ${r.busy} still being made, left as they are.` : ""), "ok");
+    await tick(); render();
+  } catch (err) { toast(err.message, "bad"); }
+});
 document.addEventListener("change", e => {
   const t = e.target;
   if (t.id === "spk_restyle") SPK.restyle = t.value;
@@ -6801,6 +6827,8 @@ document.addEventListener("click", async e => {
       finally { b.disabled = false; }
       return;
     }
+    if (a === "spkadjust") { const pairs = [...(SPK.sel || [])].map(k => k.split("/"));
+      return pairs.length ? adjustDialog(pairs[0][0], pairs[0][1], pairs) : toast("Tick the clips to adjust.", "bad"); }
     if (a === "spkrestyle") {
       const clips = [...(SPK.sel || [])].map(k => k.split("/")), template = $("#spk_restyle")?.value || "";
       if (!clips.length) return toast("Tick the clips to change.", "bad");
@@ -6933,6 +6961,9 @@ document.addEventListener("click", async e => {
     if (a === "seldl") return zipDownload(selClips());
     if (a === "cdscreen") return screenDialog(d.j, d.c);
     if (a === "cdadjust") return adjustDialog(d.j, d.c);
+    if (a === "selstyle") return tplPickDlg("sel_tpl", true);
+    if (a === "seladjust") { const pairs = selClips().map(k => { const i = k.lastIndexOf("."); return [k.slice(0, i), k.slice(i + 1)]; });
+      return pairs.length ? adjustDialog(pairs[0][0], pairs[0][1], pairs) : toast("Select finished clips first.", "bad"); }
     if (a === "selimage") return imageDialog(selClips().map(k => { const i = k.lastIndexOf("."); return [k.slice(0, i), k.slice(i + 1)]; }));
     if (a === "selclear") { sel().clear(); return render(); }
     if (a === "selall") {

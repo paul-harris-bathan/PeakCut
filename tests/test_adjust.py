@@ -113,5 +113,25 @@ c.put(B, json={"adjust": None}, headers=H)
 check("back to the style's: the clip's own settings are taken off", ("adjust" in clip, clip["status"]), (False, "queued"))
 check("the clip's settings show on the page's updates", "adjust" in jobs.public(dict(job, clips=[dict(clip, adjust={"main": {}})]))["clips"][0], True)
 
+# ---- many clips at once: exactly the same settings for all, replacing what each had
+clip["status"] = "done"
+two = dict(clip, id="clip02", adjust={"main": {"exposure": 60}}, status="done")
+busy = dict(clip, id="clip03", status="rendering")
+job["clips"] = [clip, two, busy]
+put.clear()
+pairs = [[job["id"], "clip01"], [job["id"], "clip02"], [job["id"], "clip03"], [job["id"], "nope"]]
+check("many: settings are needed", c.post("/api/clips/adjust", json={"clips": pairs}, headers=H).status_code, 400)
+check("many: at least one clip", c.post("/api/clips/adjust", json={"clips": [], "adjust": {}}, headers=H).status_code, 400)
+check("many: from another website is refused", c.post("/api/clips/adjust", json={"clips": pairs, "adjust": {}}, headers={"Origin": "https://evil.example"}).status_code, 403)
+r = c.post("/api/clips/adjust", json={"clips": pairs, "adjust": {"main": {"brightness": 15}, "cam": {"saturation": 30}}}, headers=H)
+check("many: the finished ones are made again; one being made and one gone are counted", r.json(), {"made": 2, "busy": 1, "skipped": 1})
+check("many: each gets exactly these settings (the old exposure is replaced, not kept)",
+      [(x["adjust"]["main"]["brightness"], x["adjust"]["main"]["exposure"], x["adjust"]["cam"]["saturation"]) for x in (clip, two)], [(15, 0, 30), (15, 0, 30)])
+check("many: the clip being made is left as it was", "adjust" in busy, False)
+for x in (clip, two):
+    x["status"] = "done"
+c.post("/api/clips/adjust", json={"clips": pairs[:2], "adjust": None}, headers=H)
+check("many: back to the style's takes each clip's own settings off", ("adjust" in clip, "adjust" in two), (False, False))
+
 print(f"{len(fails)} failed" if fails else "ALL PASSED")
 sys.exit(1 if fails else 0)
