@@ -2258,7 +2258,18 @@ textarea.cpg-in{height:auto;padding:8px 12px;resize:vertical}.cpg-in:focus{borde
 .spk-ul{list-style:none;padding:0;margin:8px 0 0;display:grid;gap:6px}.spk-ul li{display:flex;align-items:center;gap:10px}
 .spk-st{font-size:12px;font-weight:600;padding:1px 8px;border-radius:var(--r-sm);background:var(--brand-soft);color:var(--brand-deep);white-space:nowrap}
 .spk-st.ok{background:var(--good-soft);color:var(--good)}.spk-st.bad{background:var(--bad-soft);color:var(--bad)}
-.spk-pick input{width:16px;height:16px}.spk-open{justify-content:space-between;gap:12px;margin:8px 0}
+.spk-pick input{width:16px;height:16px}
+.spk-badge{font-size:12px;font-weight:600;padding:1px 8px;border-radius:99px;background:var(--good-soft);color:var(--good);white-space:nowrap}
+.spk-add .spk-name{flex:0 1 240px}
+.spk-hist{list-style:none;padding:0;margin:10px 0 0;display:grid;gap:2px}
+.spk-hist li{display:grid;grid-template-columns:auto auto 1fr auto;align-items:center;gap:10px;padding:6px 8px;border-radius:var(--r-sm)}
+.spk-hist li:nth-child(odd){background:var(--brand-soft)}
+.spk-hist .tm{font-variant-numeric:tabular-nums;font-weight:700}
+.spk-hist .tt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;background:none;border:0;padding:0;font:inherit;color:inherit;cursor:pointer}
+.spk-hist .tt:hover{text-decoration:underline}
+.spk-hist .mt{font-size:12px;color:var(--dim);white-space:nowrap}
+.spk-histbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}
+@media (max-width:600px){.spk-hist li{grid-template-columns:auto auto 1fr}.spk-hist .mt{grid-column:2/-1}}.spk-open{justify-content:space-between;gap:12px;margin:8px 0}
 .el-row{gap:8px;margin:10px 0 6px}.el-row input{flex:1;min-width:0}
 .scr-dlg{max-width:620px;width:100%}.scr-lines{display:grid;gap:6px;margin:12px 0;max-height:46vh;overflow:auto;padding-right:4px}
 .scr-line{display:flex;align-items:center;gap:10px}.scr-t{flex:none;width:40px;font-size:12px;font-weight:600;color:var(--dim);font-variant-numeric:tabular-nums}
@@ -3611,12 +3622,15 @@ async function drawVods(force) {
   }
   if (creatorId() !== cid || !$("#vods")) return;
   if (!got.login) { box.innerHTML = ""; return; }
-  const done = id => S.jobs.some(j => j.creator === cid && String(j.source?.url || "").includes(`/videos/${id}`));
+  const madeFrom = id => S.jobs.filter(j => j.creator === cid && (j.vod === id || new RegExp(`/videos/${id}(\\D|$)`).test(String(j.source?.url || ""))));
+  const done = id => { const js = madeFrom(id); if (!js.length) return "";
+    const n = js.reduce((k, j) => k + (j.clips || []).filter(c => c.status === "done").length, 0);
+    return n ? `Clipped · ${n} clip${n > 1 ? "s" : ""}` : "clipped"; };
   const day = s => { try { return new Date(s).toLocaleDateString(undefined, {weekday: "short", day: "numeric", month: "short"}); } catch { return ""; } };
   box.innerHTML = `<details class="vods" ${S.vodsOpen === false ? "" : "open"}><summary><b>Recent Twitch VODs</b><span class="sub">${got.vods.length} · Twitch keeps them 7 to 60 days</span></summary>
     ${got.vods.length ? `<div class="vod-list">${got.vods.map(v => `<div class="vod">
       <span class="vod-pic">${v.pic ? `<img src="${esc(v.pic)}" alt="" loading="lazy">` : ic("film")}<span class="du">${fmt(v.length)}</span></span>
-      <div class="vod-t"><b title="${esc(v.title)}">${esc(v.title || "Untitled stream")}</b><span class="sub">${esc(day(v.created))}${done(v.id) ? " · clipped" : ""}</span></div>
+      <div class="vod-t"><b title="${esc(v.title)}">${esc(v.title || "Untitled stream")}</b><span class="sub">${esc(day(v.created))}${done(v.id) ? ` · <span class="spk-badge">${done(v.id)}</span>` : ""}</span></div>
       <div class="vod-a"><button class="btn sm" data-act="vodclip" data-k="${esc(v.url)}">${ic("scissors")}Clip this</button><button class="btn sm ghost" data-act="vodspikes" data-k="${esc(v.url)}">${ic("chat")}Find spikes</button></div></div>`).join("")}</div>`
       : `<p class="sub">No past broadcasts on Twitch right now.</p>`}</details>`;
   box.querySelector("details").ontoggle = e => { S.vodsOpen = e.target.open; };
@@ -6372,7 +6386,8 @@ async function spkLoad(vid = SPK.vid) {
   if (S.view !== "spikes") return;
   drawSpikes();
   const busy = (SPK.data && SPK.data.status === "scanning") || SPK.list.some(x => x.status === "scanning")
-    || (SPK.data && SPK.data.clips && ["queued", "running"].includes(SPK.data.clips.status));
+    || (SPK.data && SPK.data.clips && ["queued", "running"].includes(SPK.data.clips.status))
+    || (SPK.data && (SPK.data.history || []).some(x => ["queued", "rendering"].includes(x.status)));
   if (busy) SPK.timer = setTimeout(() => S.view === "spikes" && spkLoad(), 2000);
 }
 function spkPoints(d) {
@@ -6422,6 +6437,33 @@ function spkState(d, t) {
               dropped: ["bad", "Left out"], muted: ["mute", "Twitch muted"]}[s.clip || "queued"] || ["wait", "Making…"];
   return {k: st[0], label: st[1], tip: s.error || "", retry: s.clip === "error" && !going};
 }
+const spkDone = d => (d.history || []).filter(x => x.status === "done").length;
+const spkBadge = n => n ? `<span class="spk-badge" title="Clips made from this VOD">Clipped · ${n} clip${n > 1 ? "s" : ""}</span>` : "";
+function spkHist(d) {
+  // every clip made from this VOD, by where it is in the stream: tick some, pick a style, make them again in it
+  const h = d.history || []; if (!h.length) return "";
+  const key = x => `${x.job}/${x.clip}`;
+  SPK.sel = new Set([...(SPK.sel || [])].filter(k => h.some(x => key(x) === k && x.status === "done")));
+  const when = t => { try { return new Date(t * 1000).toLocaleString(undefined, {day: "numeric", month: "short", hour: "numeric", minute: "2-digit"}); } catch { return ""; } };
+  const st = {queued: ["wait", "Waiting"], rendering: ["wait", "Making…"], error: ["bad", "Couldn't be made"]};
+  const row = x => { const s = st[x.status], t = tplOf(x.template);
+    return `<li><input type="checkbox" data-spkhist="${esc(key(x))}" ${SPK.sel.has(key(x)) ? "checked" : ""} aria-label="Select the clip at ${hms(x.t)}"${x.status === "done" ? "" : " disabled"}>
+      <span class="tm">${hms(x.t)}</span>
+      <button type="button" class="tt" data-act="openclip" data-j="${esc(x.job)}" data-c="${esc(x.clip)}" title="${esc(x.title)}">${esc(x.title || "Untitled clip")}</button>
+      <span class="mt">${s ? `<span class="spk-st ${s[0]}">${s[1]}</span> ` : ""}${[x.len ? `${x.len} s` : "", t ? esc(t.name) : "", x.made ? "made " + esc(when(x.made)) : ""].filter(Boolean).join(" · ")}</span></li>`; };
+  const n = SPK.sel.size, done = h.filter(x => x.status === "done");
+  return `<section class="set-sec"><h3>Clips from this VOD <span class="sub">(${h.length})</span></h3><p class="help">Every clip made from this stream, by where it is in the VOD. Tick clips, pick a style, and they are made again in it.</p>
+    ${done.length ? `<div class="spk-histbar"><label class="row" style="gap:6px"><input type="checkbox" data-spkhistall ${n && n === done.length ? "checked" : ""}>Select all</label>
+      ${tplAll().length ? tplChip("spk_restyle", SPK.restyle && tplOf(SPK.restyle) ? SPK.restyle : S.tpl.default) : ""}
+      <button class="btn sm primary" data-act="spkrestyle"${n ? "" : " disabled"}>${ic("sliders")}Change style${n ? ` of ${n} clip${n > 1 ? "s" : ""}` : ""}</button></div>` : ""}
+    <ul class="spk-hist">${h.map(row).join("")}</ul></section>`;
+}
+document.addEventListener("change", e => {
+  const t = e.target;
+  if (t.id === "spk_restyle") SPK.restyle = t.value;
+  if (t.matches?.("[data-spkhist]")) { SPK.sel ||= new Set(); t.checked ? SPK.sel.add(t.dataset.spkhist) : SPK.sel.delete(t.dataset.spkhist); drawSpikes(); }
+  if (t.matches?.("[data-spkhistall]")) { SPK.sel = new Set(t.checked ? (SPK.data?.history || []).filter(x => x.status === "done").map(x => `${x.job}/${x.clip}`) : []); drawSpikes(); }
+});
 function spkTpl(d) {
   // the style the ticked spikes are made in: the one picked here, else the streamer's own, else the account's default
   if (SPK.tpl && tplOf(SPK.tpl)) return SPK.tpl;
@@ -6451,17 +6493,17 @@ function drawSpikes() {
   const box = $("#spk"); if (!box) return;
   const d = SPK.data, scanning = d && d.status === "scanning";
   const head = `<section class="set-sec"><h2>Chat spikes</h2><p class="help">Paste a Twitch VOD link. PeakCut reads how fast chat was going across the whole video and shows where it spiked, measured against that stream's own normal chat. Nothing is downloaded but chat timings, and no AI is used.</p>
-    <form class="row spk-add" id="spkform"><input id="spkurl" placeholder="https://www.twitch.tv/videos/1234567890" spellcheck="false" aria-label="Twitch VOD link"><button class="btn primary">${ic("search")}Find spikes</button></form></section>`;
+    <form class="row spk-add" id="spkform"><input id="spkurl" placeholder="https://www.twitch.tv/videos/1234567890" spellcheck="false" aria-label="Twitch VOD link"><input id="spkname" class="spk-name" maxlength="100" placeholder="Name it (optional)" aria-label="Name for this VOD (optional)" title="Shown instead of the stream's Twitch title, on this page and on its clips' video"><button class="btn primary">${ic("search")}Find spikes</button></form></section>`;
   const body = !d ? "" : d.status === "error" ? `<p class="hq-note bad">${ic("warn")}${esc(d.error || "The scan failed.")}</p>`
-    : scanning ? `<section class="set-sec"><h2>${esc(d.title || "Twitch video")}</h2><p class="sub">${esc(d.streamer)} · ${hms(d.length)}</p>
+    : scanning ? `<section class="set-sec"><h2>${esc(d.name || d.title || "Twitch video")}</h2><p class="sub">${esc(d.streamer)} · ${hms(d.length)}</p>
         <div class="spk-prog"><i style="width:${Math.round((d.progress || 0) * 100)}%"></i></div><p class="sub">Reading chat… ${Math.round((d.progress || 0) * 100)}%. A 10-hour VOD takes about 7 minutes.</p></section>`
-    : `<section class="set-sec"><div class="spk-title"><div><h2>${esc(d.title || "Twitch video")}</h2><p class="sub">${esc(d.streamer)} · ${hms(d.length)} · <a href="https://www.twitch.tv/videos/${esc(d.id)}" target="_blank" rel="noopener">Open on Twitch</a></p></div>
+    : `<section class="set-sec"><div class="spk-title"><div><h2>${esc(d.name || d.title || "Twitch video")} ${spkBadge(spkDone(d))}</h2><p class="sub">${d.name && d.title ? `${esc(d.title)} · ` : ""}${esc(d.streamer)} · ${hms(d.length)} · <a href="https://www.twitch.tv/videos/${esc(d.id)}" target="_blank" rel="noopener">Open on Twitch</a></p></div>
         <button class="btn sm icon ghost" data-act="spkdel" data-k="${esc(d.id)}" title="Remove this scan" aria-label="Remove this scan">${ic("trash")}</button></div>
         ${spkGraph(d)}
         <label class="spk-sens">How picky<input type="range" id="spks" min="0.5" max="2" step="0.1" value="${SPK.s}"><span>${SPK.s <= 0.8 ? "More spikes" : SPK.s >= 1.3 ? "Fewer spikes" : "Normal"} · big ${(3 * SPK.s).toFixed(1)}×, worth a look ${(2.5 * SPK.s).toFixed(1)}×</span></label>
-        ${spkList(d)}</section>`;
+        ${spkList(d)}</section>${spkHist(d)}`;
   const others = SPK.list.filter(x => x.id !== SPK.vid);
-  const past = others.length ? `<section class="set-sec"><h3>Scanned before</h3><ul class="spk-ul">${others.map(x => `<li><button class="btn sm ghost" data-act="spkopen" data-k="${esc(x.id)}">${esc(x.title || x.id)}</button><span class="sub">${esc(x.streamer || "")}${x.length ? " · " + hms(x.length) : ""}${x.status === "scanning" ? " · reading chat…" : x.status === "error" ? " · failed" : ""}</span></li>`).join("")}</ul></section>` : "";
+  const past = others.length ? `<section class="set-sec"><h3>Scanned before</h3><ul class="spk-ul">${others.map(x => `<li><button class="btn sm ghost" data-act="spkopen" data-k="${esc(x.id)}">${esc(x.name || x.title || x.id)}</button>${spkBadge(x.clipped)}<span class="sub">${esc(x.streamer || "")}${x.length ? " · " + hms(x.length) : ""}${x.status === "scanning" ? " · reading chat…" : x.status === "error" ? " · failed" : ""}</span></li>`).join("")}</ul></section>` : "";
   put(box, head + body + past);
   const svg = $("#spksvg"), tip = $("#spktip"), cur = $("#spkcur");
   if (svg && d) {
@@ -6475,8 +6517,8 @@ function drawSpikes() {
   const form = $("#spkform");
   if (form) form.onsubmit = async e => {
     e.preventDefault();
-    const url = $("#spkurl").value.trim(); if (!url) return;
-    try { const got = await send("/api/spikes", {url}); SPK.vid = got.id; SPK.data = got; $("#spkurl").value = ""; spkLoad(got.id); }
+    const url = $("#spkurl").value.trim(), name = $("#spkname").value.trim(); if (!url) return;
+    try { const got = await send("/api/spikes", {url, name}); SPK.vid = got.id; SPK.data = got; $("#spkurl").value = $("#spkname").value = ""; spkLoad(got.id); }
     catch (err) { toast(err.message, "bad"); }
   };
   const sl = $("#spks");
@@ -6677,6 +6719,17 @@ document.addEventListener("click", async e => {
       const template = $("#spk_tpl")?.value || "";
       try { await send(`/api/spikes/${encodeURIComponent(SPK.vid)}/clip`, {times, template}); toast(`Making ${times.length} spike clip${times.length > 1 ? "s" : ""}.`, "ok"); await spkLoad(); }
       finally { b.disabled = false; }
+      return;
+    }
+    if (a === "spkrestyle") {
+      const clips = [...(SPK.sel || [])].map(k => k.split("/")), template = $("#spk_restyle")?.value || "";
+      if (!clips.length) return toast("Tick the clips to change.", "bad");
+      b.disabled = true;
+      try {
+        const r = await send("/api/clips/style", {clips, template});
+        toast(`Making ${r.made} clip${r.made === 1 ? "" : "s"} again in ${tplOf(template)?.name || "that style"}.` + (r.busy ? ` ${r.busy} still being made, left as they are.` : ""), "ok");
+        SPK.sel = new Set(); await spkLoad();
+      } catch (err) { toast(err.message, "bad"); } finally { b.disabled = false; }
       return;
     }
     if (a === "spkunit") { SPK.unit = Number(d.k); return drawSpikes(); }
