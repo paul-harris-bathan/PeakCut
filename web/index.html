@@ -2279,6 +2279,9 @@ textarea.cpg-in{height:auto;padding:8px 12px;resize:vertical}.cpg-in:focus{borde
 .scr-dlg{max-width:620px;width:100%}.scr-lines{display:grid;gap:6px;margin:12px 0;max-height:46vh;overflow:auto;padding-right:4px}
 .scr-line{display:flex;align-items:center;gap:10px}.scr-t{flex:none;width:40px;font-size:12px;font-weight:600;color:var(--dim);font-variant-numeric:tabular-nums}
 .scr-line input{flex:1;min-width:0}
+.len-box{display:grid;gap:6px;width:100%}.len-row{display:grid;grid-template-columns:44px 74px 1fr;align-items:center;gap:8px;font-size:14px}
+.len-row b{font-variant-numeric:tabular-nums}.len-btns{display:flex;gap:4px;flex-wrap:wrap}.len-btns .btn{min-width:46px;padding-inline:8px}
+.len-row b.moved{color:var(--brand-deep)}
 .adj-dlg{max-width:760px;width:100%}
 .tpe-adj{display:grid;grid-template-columns:150px 1fr;gap:16px;margin-top:8px}.tpe-adjpv{width:150px;height:267px}
 .tpe-adjnone{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:10px;font-size:12px;color:#fff;background:#222}
@@ -6441,7 +6444,8 @@ function drawClipDlg(full) {
           <span class="sub">When the words on the video are wrong</span></div></div>
           <div class="ce3-f"><label>Picture</label><div class="row" style="gap:8px;align-items:center">
           <button type="button" class="btn sm" data-act="cdadjust" data-j="${esc(j.id)}" data-c="${esc(c.id)}">${ic("sliders")}Adjust</button>
-          <span class="sub">${c.adjust && Object.keys(c.adjust).length ? "Adjusted · " : ""}Exposure, brightness, colour, sharpness</span></div></div>` : ""}
+          <span class="sub">${c.adjust && Object.keys(c.adjust).length ? "Adjusted · " : ""}Exposure, brightness, colour, sharpness</span></div></div>
+          <div class="ce3-f"><label>Length</label><div id="cdlenbox">${lenBox(j, c)}</div></div>` : ""}
         <div class="ce3-line"></div>
         <div id="dposts"></div>
         ${c.status !== "done" ? `<p class="ce2-note">${c.status === "error" ? "This clip couldn't be made, so it can't be posted." : "It can be posted once it's made."}</p>` : postSoon() ? soonBox() : accs.length ? (accs.every(gone) ? `<p class="ce2-note">It's going to every account you have.</p>` : `
@@ -6462,6 +6466,24 @@ function drawClipDlg(full) {
 // The clip as it will look with the changes, drawn over its own cover frame: the video band where the layout puts it,
 // the big text, the captions in their style, and the campaign's logo. Same geometry the server draws with.
 function cdVal(c, k) { return D.draft[k] ?? c[k]; }
+// Length: move the clip's start earlier or later, and its end, then make it again. A clip from a VOD can grow past
+// the piece it has (more is fetched); a live clip only within what was recorded.
+const lenT = t => { const r = Math.round(t * 10), w = Math.floor(r / 10), f = r % 10; return hms(w) + (f ? "." + f : ""); };
+function lenLimits(j, c) {
+  if (j.kind === "live" && c.src_offset != null) return [c.src_offset, c.src_end, true];
+  return [0, j.duration || Infinity, false];
+}
+function lenBox(j, c) {
+  if (!D.len || D.len.k !== j.id + "/" + c.id) D.len = {k: j.id + "/" + c.id, start: c.start, end: c.end};
+  const L = D.len, [lo, hi, live] = lenLimits(j, c), moved = L.start !== c.start || L.end !== c.end, n = L.end - L.start;
+  const more = !live && c.src_offset != null && (L.start < c.src_offset - 0.05 || L.end > c.src_end + 0.05);
+  const btns = k => [-5, -1, 1, 5].map(d => `<button type="button" class="btn sm ghost" data-act="cdlen" data-k="${k}" data-d="${d}" aria-label="${k === "start" ? "Start" : "End"} ${Math.abs(d)} s ${d < 0 ? "earlier" : "later"}">${d < 0 ? "−" : "+"}${Math.abs(d)} s</button>`).join("");
+  return `<div class="len-box"><div class="len-row"><span>Start</span><b class="${L.start !== c.start ? "moved" : ""}">${lenT(L.start)}</b><div class="len-btns">${btns("start")}</div></div>
+    <div class="len-row"><span>End</span><b class="${L.end !== c.end ? "moved" : ""}">${lenT(L.end)}</b><div class="len-btns">${btns("end")}</div></div>
+    <span class="sub">${Math.round(n * 10) / 10} s long${moved ? ` (was ${Math.round((c.end - c.start) * 10) / 10} s)` : ""}. Times are where it is in the stream.${more ? " More of the video is fetched for this." : ""}${live ? ` A live clip can use only what was recorded: ${lenT(lo)} to ${lenT(hi)}.` : ""}</span>
+    ${moved ? `<div class="row" style="gap:8px"><button type="button" class="btn sm ghost" data-act="cdlenreset">Undo</button><button type="button" class="btn sm primary" data-act="cdlenapply">${ic("scissors")}Apply and re-make</button></div>` : ""}</div>`;
+}
+function lenDraw() { const j = jobOf(D.jid), c = j?.clips.find(x => x.id === D.cid), box = $("#cdlenbox"); if (j && c && box) box.innerHTML = lenBox(j, c); }
 function cdPaint() {
   const j = jobOf(D.jid), c = j?.clips.find(x => x.id === D.cid); if (!c || !$("#cdprev")) return;
   const cr = S.creators.find(x => x.id === j.creator), e = campOf(j), m = `/media/${j.id}/`;
@@ -7053,6 +7075,21 @@ document.addEventListener("click", async e => {
     if (a === "seldl") return zipDownload(selClips());
     if (a === "cdscreen") return screenDialog(d.j, d.c);
     if (a === "cdadjust") return adjustDialog(d.j, d.c);
+    if (a === "cdlen" || a === "cdlenreset") {         // the clip's start or end moved 1 or 5 seconds, within what's allowed
+      const j = jobOf(D.jid), c = j?.clips.find(x => x.id === D.cid); if (!c || !D.len) return;
+      if (a === "cdlenreset") { D.len.start = c.start; D.len.end = c.end; return lenDraw(); }
+      const [lo, hi] = lenLimits(j, c), v = Math.round((D.len[d.k] + Number(d.d)) * 10) / 10;
+      if (d.k === "start") D.len.start = Math.max(lo, Math.min(v, D.len.end - 3)); else D.len.end = Math.min(hi, Math.max(v, D.len.start + 3));
+      if (D.len.end - D.len.start > 180) return toast("A clip can be up to 3 minutes long.", "bad");
+      return lenDraw();
+    }
+    if (a === "cdlenapply") {
+      const L = D.len; if (!L) return;
+      b.disabled = true;
+      try { await send(`/api/jobs/${D.jid}/clips/${D.cid}/render`, {start: L.start, end: L.end}); toast("Making the clip again at its new length.", "ok"); D.len = null; await tick(); return drawClipDlg(true); }
+      catch (err) { toast(err.message, "bad"); } finally { b.disabled = false; }
+      return;
+    }
     if (a === "selstyle") return tplPickDlg("sel_tpl", true);
     if (a === "seladjust") { const pairs = selClips().map(k => { const i = k.lastIndexOf("."); return [k.slice(0, i), k.slice(i + 1)]; });
       return pairs.length ? adjustDialog(pairs[0][0], pairs[0][1], pairs) : toast("Select finished clips first.", "bad"); }

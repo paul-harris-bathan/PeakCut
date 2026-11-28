@@ -218,6 +218,22 @@ def _prepare(job, spike: dict, n: int) -> dict:
     return clip
 
 
+def rehear(job, clip):
+    """A spike clip whose piece was fetched again, wider (made longer by hand): ElevenLabs hears the new piece, so the
+    captions cover the whole clip. The words are proofread by the AI when the clip is made, as the first time."""
+    piece = Path(clip["src"])
+    wav = piece.with_suffix(".wav")
+    try:
+        media.extract_audio(piece, wav)
+        heard, lang = eleven.transcribe(wav)
+    finally:
+        wav.unlink(missing_ok=True)
+    a = float(clip.get("src_offset") or 0)
+    words = [dict(w, s=round(w["s"] + a, 2), e=round(w["e"] + a, 2)) for w in heard]
+    clip["heard"] = {"a": clip["start"], "b": clip["end"], "lang": lang or (clip.get("heard") or {}).get("lang") or "", "raw": True,
+                     "words": [w for w in words if clip["start"] - 0.3 <= w["s"] < clip["end"]]}
+
+
 def run(job):
     """Make a clip for every spike of this video that doesn't have one yet (called by the jobs worker)."""
     t0 = time.time()
