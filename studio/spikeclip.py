@@ -60,6 +60,12 @@ def need_keys():
 def creator_for(login: str, scan: dict | None = None):
     """The streamer in PeakCut whose channel this is (Twitch, or YouTube for a YouTube stream), if there is one."""
     login = (login or "").lower()
+    if (scan or {}).get("platform") == "kick":
+        for c in creators.all_creators():
+            link = str((c.get("channels") or {}).get("kick") or "").lower()
+            if login and re.search(r"kick\.com/" + re.escape(login) + r"(?:[/?#]|$)", link):
+                return c["id"]
+        return None
     if (scan or {}).get("platform") == "youtube":
         cid = str(scan.get("channel_id") or "").lower()
         for c in creators.all_creators():
@@ -96,7 +102,9 @@ def clip_spikes(scan: dict, times: list, why: str = "picked", template: str | No
     fresh = not job
     if fresh:             # a new video is born "queued", but is only in the line once enqueue() puts it there (below)
         named = scan.get("name") or scan.get("title") or ""     # the name given before the scan, else Twitch's title
-        job = jobs.create({"type": "url", "url": scan.get("url") or f"https://www.twitch.tv/videos/{vid}", "name": named},
+        # a Kick stream is fetched from its own stream file (Kick's page link doesn't download); the page is kept too
+        job = jobs.create({"type": "url", "url": scan.get("source") or scan.get("url") or f"https://www.twitch.tv/videos/{vid}",
+                           "name": named, **({"page": scan["url"]} if scan.get("source") else {})},
                           {"template": tid} if tid else {},
                           enqueue=False, creator=creator_for(scan.get("login"), scan), kind="spikes")
         job.update(vod=vid, spikes=[], title=named, uploader=scan.get("streamer") or "",
@@ -285,7 +293,8 @@ def vod_jobs(vid: str) -> list:
     from . import ytchat
     for j in jobs.list_jobs():
         url = str((j.get("source") or {}).get("url") or "")
-        same = ytchat.video_id(url) == vid[3:] if vid.startswith("yt-") else bool(re.search(r"/videos/" + re.escape(vid) + r"(?:\D|$)", url))
+        same = (ytchat.video_id(url) == vid[3:] if vid.startswith("yt-") else vid[3:] in url.lower() if vid.startswith("kk-")
+                else bool(re.search(r"/videos/" + re.escape(vid) + r"(?:\D|$)", url)))
         if (j.get("kind") == "spikes" and j.get("vod") == vid) or same:
             out.append(jobs.get(j["id"]) or j)
     return out

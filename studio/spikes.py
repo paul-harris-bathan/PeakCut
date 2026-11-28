@@ -1,5 +1,5 @@
-"""Spike mode, part 1: where chat went wild in a Twitch VOD (or a past YouTube live stream: studio/ytchat.py reads
-its chat replay, and everything else here is the same).
+"""Spike mode, part 1: where chat went wild in a Twitch VOD (or a past YouTube live stream, studio/ytchat.py, or a
+past Kick stream, studio/kickchat.py: they read the chat, and everything else here is the same).
 
 Twitch keeps a past broadcast's chat with the video. Reading every message needs a check only Twitch's own site can
 pass, but asking for the chat at any moment does not: each answer is the first ~50 messages from that second on. So
@@ -196,15 +196,18 @@ def _dir() -> Path:
 
 
 def scan_key(url: str) -> str:
-    """What a scan is kept under: a Twitch VOD's number, or "yt-" and a YouTube video's id; '' for any other link."""
-    from . import ytchat
+    """What a scan is kept under: a Twitch VOD's number, "yt-" and a YouTube video's id, or "kk-" and a Kick past
+    stream's id; '' for any other link."""
+    from . import kickchat, ytchat
     if ytchat.video_id(url):
         return "yt-" + ytchat.video_id(url)
+    if kickchat.video_id(url):
+        return "kk-" + kickchat.video_id(url)
     return vod_id(url)
 
 
 def _file(vid: str) -> Path:
-    if not re.fullmatch(r"\d{6,14}|yt-[\w-]{11}", vid or ""):
+    if not re.fullmatch(r"\d{6,14}|yt-[\w-]{11}|kk-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", vid or ""):
         raise ValueError("bad video id")
     return _dir() / f"{vid}.json"
 
@@ -248,7 +251,7 @@ def _fresh_muted(vid: str, data: dict, save: bool = True):
     """Ask Twitch which stretches are muted if the scan never did (made before this) or did a while ago. Kept with the
     scan. If Twitch doesn't answer, what was known is used, and it is asked again in a few minutes."""
     now = time.time()
-    if vid.startswith("yt-"):                 # muting like Twitch's is a Twitch thing
+    if not vid.isdigit():                     # muting like Twitch's is a Twitch thing
         return
     if now - float(data.get("muted_at") or 0) < MUTED_FRESH or now - _muted_failed.get(vid, 0) < MUTED_RETRY:
         return
@@ -293,10 +296,11 @@ def clean_name(name) -> str:
 def start(url: str, name: str = "") -> dict:
     """Begin scanning a Twitch VOD's (or a past YouTube live stream's) chat in the background. Returns the video's
     details straight away. `name`: what to call it in PeakCut (its spike clips' video too) instead of its title."""
-    from . import ytchat
+    from . import kickchat, ytchat
     vid = scan_key(url)
     if not vid:
-        raise ValueError("Paste a Twitch VOD link (https://www.twitch.tv/videos/...) or a YouTube live stream link (https://www.youtube.com/watch?v=...)")
+        raise ValueError("Paste a Twitch VOD, a past YouTube live stream or a past Kick stream link "
+                         "(twitch.tv/videos/..., youtube.com/watch?v=..., kick.com/<channel>/videos/...)")
     u = ctx.uid()
     with _lock:
         if (u, vid) in _scans and _scans[(u, vid)].get("status") == "scanning":
@@ -306,6 +310,11 @@ def start(url: str, name: str = "") -> dict:
         if info["length"] > MAX_HOURS * 3600:
             raise ValueError(f"That video is longer than {MAX_HOURS} hours.")
         read = lambda moved: ytchat.sample(vid[3:], info["length"], progress=moved)   # noqa: E731
+    elif vid.startswith("kk-"):
+        info = kickchat.info(vid[3:])
+        if info["length"] > MAX_HOURS * 3600:
+            raise ValueError(f"That video is longer than {MAX_HOURS} hours.")
+        read = lambda moved: kickchat.sample(info, progress=moved)   # noqa: E731
     else:
         info = dict(vod_info(vid), platform="twitch", url=f"https://www.twitch.tv/videos/{vid}")
         read = lambda moved: sample(vid, info["length"], progress=moved)   # noqa: E731
