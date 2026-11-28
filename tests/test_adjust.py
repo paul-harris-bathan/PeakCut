@@ -27,7 +27,7 @@ def check(n, got, want=True):
 # ---- the settings
 a = templates.clean_adjust({"main": {"exposure": 250, "sharpen": -40, "temp": "-30", "junk": 5}, "cam": {"brightness": 20}, "other": {"x": 1}})
 check("settings are held in range; unknown ones dropped", (a["main"]["exposure"], a["main"]["sharpen"], a["main"]["temp"], set(a)),
-      (100, 0, -30, {"main", "cam"}))
+      (100, 0, -30, {"main", "cam", "chat"}))
 check("every setting is there for each part", sorted(a["cam"]), sorted(templates.ADJUST_KEYS))
 check("all zero is nothing to change", (templates.clean_adjust({"main": {"brightness": 0}}), templates.clean_adjust("x")), (None, None))
 check("no settings: no filters", render.adjust_filter(None) + render.adjust_filter({"brightness": 0}), "")

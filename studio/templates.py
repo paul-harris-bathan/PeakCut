@@ -20,7 +20,7 @@ FONTS = {"Poppins ExtraBold": "Poppins-ExtraBold.ttf", "Poppins Black": "Poppins
          "Permanent Marker": "PermanentMarker-Regular.ttf", "Righteous": "Righteous-Regular.ttf"}
 # how the word being said stands out: grows in its colour, sits in a box of that colour, the said words fill with it, or nothing
 ANIMS = {"pop": "Pop", "box": "Box", "fill": "Fill", "none": "Plain"}
-LAYOUTS = ("blur", "zoom", "crop", "left", "right", "fit", "split", "gameplay")
+LAYOUTS = ("blur", "zoom", "crop", "left", "right", "fit", "split", "gameplay", "custom")
 MAX_OWN = 30
 
 _CAP = {"show": True, "anim": "pop", "font": "Poppins ExtraBold", "color": "FFFFFF", "hi": "FFF000", "key": "FFFFFF", "outline": 7,
@@ -41,7 +41,7 @@ LEGACY = {"bounce": {},
 LEGACY_NAMES = {"bounce": "Bounce", "hype": "Hype", "clean": "Clean"}
 LAYOUT_NAMES = {"blur": "Full + blur", "zoom": "Zoomed in", "crop": "Fill the screen", "left": "Fill, keep the left side",
                 "right": "Fill, keep the right side", "fit": "Full frame on black", "split": "Split screen (two people)",
-                "gameplay": "Gameplay + facecam in the corner"}
+                "gameplay": "Gameplay + facecam in the corner", "custom": "Custom: place everything yourself"}
 
 BUILTIN = [
     {"id": "b-bounce", "name": "Bounce", "look": _look(LEGACY["bounce"])},
@@ -112,18 +112,32 @@ def clean_look(raw) -> dict:
     cs = raw.get("cam_style") if isinstance(raw.get("cam_style"), dict) else {}
     # the cam's look: rounded corners (radius as % of the box's shorter side: 50 is fully round), and a border
     cam_style = {"r": _num(cs.get("r"), 0, 50, 0), "bw": _num(cs.get("bw"), 0, 24, 0), "bc": _hex(cs.get("bc"), "FFFFFF")}
+    # the chat box: where it goes in the clip, where the chat is in the stream (drawn by hand), and its look: corners,
+    # border, how see-through (op, %), and its background colour taken out (key: on, kc: the colour, ks: how much)
+    ch = raw.get("chat_style") if isinstance(raw.get("chat_style"), dict) else {}
+    chat_style = {"r": _num(ch.get("r"), 0, 50, 0), "bw": _num(ch.get("bw"), 0, 24, 0), "bc": _hex(ch.get("bc"), "FFFFFF"),
+                  "op": _num(ch.get("op"), 10, 100, 100), "key": bool(ch.get("key")), "kc": _hex(ch.get("kc"), "000000"),
+                  "ks": _num(ch.get("ks"), 5, 60, 25)}
     return {"cap": cap, "hook": hook, "cam": _cam(raw.get("cam")), "cam_style": cam_style, "cam_src": facecam.clean(raw.get("cam_src")),
             "game_src": facecam.clean(raw.get("game_src")),
+            "chat": _box(raw.get("chat"), 8, 5), "chat_src": facecam.clean(raw.get("chat_src")), "chat_style": chat_style,
+            # the Custom layout: where the gameplay goes in the clip (None: the whole frame)
+            "game": _box(raw.get("game"), 10, 5),
             "adjust": clean_adjust(raw.get("adjust")),      # picture settings new clips in this style start with
             "layout": raw.get("layout") if raw.get("layout") in LAYOUTS else "blur"}
 
 
 def _cam(v):
     """Where the streamer's camera goes in the clip: {"x", "y", "w", "h"} as shares of the 9:16 frame (0-100), or None."""
+    return _box(v, 15, 8)
+
+
+def _box(v, min_w, min_h):
+    """A box in the 9:16 frame: {"x", "y", "w", "h"} as shares of it (0-100), at least min_w x min_h; or None."""
     if not isinstance(v, dict):
         return None
     try:
-        w, h = max(15.0, min(100.0, float(v["w"]))), max(8.0, min(100.0, float(v["h"])))
+        w, h = max(float(min_w), min(100.0, float(v["w"]))), max(float(min_h), min(100.0, float(v["h"])))
         x, y = max(0.0, min(100.0 - w, float(v["x"]))), max(0.0, min(100.0 - h, float(v["y"])))
     except (KeyError, TypeError, ValueError):
         return None
@@ -133,7 +147,7 @@ def _cam(v):
 # Picture adjustments, for the main picture and for the streamer's cam apart: -100 to 100 each (0: unchanged), sharpen
 # 0 to 100. Kept on a clip ("adjust") and, later, in a style.
 ADJUST_KEYS = ("exposure", "brightness", "contrast", "saturation", "temp", "sharpen", "shadows", "highlights")
-ADJUST_PARTS = ("main", "cam")
+ADJUST_PARTS = ("main", "cam", "chat")
 
 
 def clean_adjust(raw) -> dict | None:
