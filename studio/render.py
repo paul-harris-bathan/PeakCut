@@ -472,7 +472,36 @@ PIP_W = 380            # how wide the facecam is in the 1080-wide frame (the gam
 PIP_MARGIN = 26
 
 
-def _filter(layout, fg_h, facecam=None):
+def adjust_filter(a) -> str:
+    """ffmpeg filters for one part's picture adjustments (templates.clean_adjust), ending in a comma; "" for none.
+    Exposure (up to 1.5 stops either way), contrast (an S-curve: blacks stay black, so a dark stream doesn't sink),
+    shadows and highlights are one curve; brightness and saturation one eq; warm/cool shifts red against blue;
+    sharpen is an unsharp mask."""
+    if not a or not any(a.values()):
+        return ""
+    out = []
+    ev, sh, hi, con = (a.get(k, 0) / 100 for k in ("exposure", "shadows", "highlights", "contrast"))
+    if ev or sh or hi or con:
+        g = 2 ** (ev * 1.5)
+        ys = [min(1.0, x * g) for x in (0.0, 0.25, 0.5, 0.75, 1.0)]
+        ys[1] += sh * 0.15 - con * 0.08
+        ys[3] += hi * 0.15 + con * 0.08
+        ys = [max(0.0, min(1.0, y)) for y in ys]
+        out.append("curves=all='" + " ".join(f"{x}/{y:.3f}" for x, y in zip((0, 0.25, 0.5, 0.75, 1), ys)) + "'")
+    b, s = a.get("brightness", 0), a.get("saturation", 0)
+    if b or s:
+        out.append(f"eq=brightness={b / 100 * 0.3:.3f}:saturation={1 + s / 100:.3f}")
+    t = a.get("temp", 0) / 100 * 0.3
+    if t:
+        out.append(f"colorbalance=rm={t:.3f}:rh={t / 2:.3f}:bm={-t:.3f}:bh={-t / 2:.3f}")    # mids and highlights: black stays black
+    if a.get("sharpen"):
+        out.append(f"unsharp=5:5:{a['sharpen'] / 100 * 1.5:.2f}:5:5:0")
+    return ",".join(out) + ","
+
+
+def _filter(layout, fg_h, facecam=None, main="", camf=""):
+    """The video for a layout, ending in [v0]. `main` / `camf`: picture adjustments (adjust_filter) for the main
+    picture and for the found webcam of the gameplay layout."""
     if layout == "gameplay" and facecam:
         # The game fills the screen, and the webcam sits in the top corner of it, so a viewer sees
         # the play and the face at the same time.
@@ -480,9 +509,13 @@ def _filter(layout, fg_h, facecam=None):
         if fw > 8 and fh > 8:
             pip_h = max(2, int(round(PIP_W * fh / fw)))
             return (f"[0:v]fps={config.OUT_FPS},split=2[base][fc];"
-                    f"[base]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1[b];"
-                    f"[fc]crop={fw}:{fh}:{fx}:{fy},scale={PIP_W}:{pip_h},setsar=1[p];"
+                    f"[base]{main}scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1[b];"
+                    f"[fc]crop={fw}:{fh}:{fx}:{fy},{camf}scale={PIP_W}:{pip_h},setsar=1[p];"
                     f"[b][p]overlay={W - PIP_W - PIP_MARGIN}:{PIP_MARGIN}[v0];")
+    return _layout(layout, fg_h, facecam).replace("[0:v]", "[0:v]" + main, 1)
+
+
+def _layout(layout, fg_h, facecam=None):
     fill = f"[0:v]fps={config.OUT_FPS},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
     if layout == "crop" or (layout == "gameplay" and not facecam):
         return fill + ",setsar=1[v0];"
@@ -591,7 +624,7 @@ def cam_frame(cam, look_style, out_dir: Path, name: str) -> dict:
     return out
 
 
-def cam_filter(cam, layout, fg_h, crop="", frame=None):
+def cam_filter(cam, layout, fg_h, crop="", frame=None, main="", camf=""):
     """The video with the streamer's cam: the game as the layout has it (or filling the rest of the frame when the
     cam is stacked), and the cam cut from the source, filling its box. `frame`: {"mask": input index, "border":
     input index} of the pictures that round its corners and draw its border."""
@@ -599,12 +632,12 @@ def cam_filter(cam, layout, fg_h, crop="", frame=None):
     fps = config.OUT_FPS
     if cam["stack"]:
         gy, gh = (cam["bh"], H - cam["bh"]) if cam["by"] == 0 else (0, cam["by"])
-        game = (f"[s0]{crop}fps={fps},format=yuv420p,scale={W}:{gh}:force_original_aspect_ratio=increase,crop={W}:{gh},"
+        game = (f"[s0]{crop}{main}fps={fps},format=yuv420p,scale={W}:{gh}:force_original_aspect_ratio=increase,crop={W}:{gh},"
                 f"pad={W}:{H}:0:{gy}:black,setsar=1[vg];")
     else:
-        game = _filter(layout, fg_h).replace("[0:v]", "[s0]" + crop, 1).replace("[v0];", "[vg];")
+        game = _filter(layout, fg_h, main=main).replace("[0:v]", "[s0]" + crop, 1).replace("[v0];", "[vg];")
     return ("[0:v]split=2[s0][s1];" + game +
-            f"[s1]fps={fps},format=yuv420p,crop={cam['sw']}:{cam['sh']}:{cam['sx']}:{cam['sy']},"
+            f"[s1]fps={fps},format=yuv420p,crop={cam['sw']}:{cam['sh']}:{cam['sx']}:{cam['sy']},{camf}"
             f"scale={cam['bw']}:{cam['bh']}:force_original_aspect_ratio=increase,crop={cam['bw']}:{cam['bh']},setsar=1"
             + (f",format=rgba[cr];[{frame['mask']}:v]format=gray,scale={cam['bw']}:{cam['bh']}[cmk];[cr][cmk]alphamerge[cm];"
                if "mask" in frame else "[cm];")
@@ -657,6 +690,36 @@ def render_clip(src: Path, out_dir: Path, name: str, clip: dict, words: list, sr
     extras = extras or {}
     out_dir.mkdir(parents=True, exist_ok=True)
     start, end = clip["start"], clip["end"]
+    pl = plan(clip, src_w, src_h, extras)
+    look, layout, fg_h, hook_y, cap_y, cam, crop, face = (pl[k] for k in ("look", "layout", "fg_h", "hook_y", "cap_y", "cam", "crop", "face"))
+    info = {"emoji": []}
+    show_caps = look["cap"]["show"] and clip.get("captions", True) is not False     # the style, and the captions switch
+    ass = build_ass(words if show_caps else [], start, end, clip.get("hook", ""), look["cap"], clip.get("highlight_words", []),
+                    hook_y, cap_y, note=extras.get("note", ""), info=info, show_hook=look["hook"]["show"],
+                    hook_look=look["hook"], script=clip.get("script") or "")
+    # The clip is made in a short work folder and moved into place afterwards. The caption step of ffmpeg cannot
+    # open files whose full path is longer than 260 characters on Windows, which a data folder deep inside other
+    # folders easily reaches. Inside the work folder every name is short and relative (a drive colon would also
+    # break the filter syntax).
+    work = Path(tempfile.mkdtemp(prefix="pk"))
+    try:
+        # The title and description are also written into the file itself, for any place that reads them from it.
+        meta = {"title": clip.get("title") or "", "description": clip.get("description") or "", "comment": clip.get("description") or ""}
+        got = _render_in(work, src, out_dir, name, start, end, layout, fg_h, ass, look, cam, crop, face, info, extras, meta, adjust=pl["adjust"])
+        return dict(got, layout=layout)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def adjust_of(clip: dict, look: dict) -> dict | None:
+    """The picture adjustments a clip is made with: its own if it has them, else its style's."""
+    return templates.clean_adjust(clip["adjust"] if "adjust" in clip else (look or {}).get("adjust"))
+
+
+def plan(clip: dict, src_w: int, src_h: int, extras: dict = None) -> dict:
+    """How a clip's picture is put together: its look, layout, where the heading and captions go, the cam, the part
+    of the video shown, the found webcam, and the picture adjustments."""
+    extras = extras or {}
     look = templates.clean_look(clip["look"]) if isinstance(clip.get("look"), dict) else templates.legacy(clip.get("style", "bounce"), clip.get("layout", "blur"))
     gs, crop = look.get("game_src"), ""
     if gs:                                # only this part of the video is shown (a zoomed-in stream, say)
@@ -678,41 +741,55 @@ def render_clip(src: Path, out_dir: Path, name: str, clip: dict, words: list, sr
         cap_y = int(H * look["cap"]["y"] / 100)
     if look["hook"]["y"] is not None:
         hook_y = int(H * look["hook"]["y"] / 100)
-    info = {"emoji": []}
-    show_caps = look["cap"]["show"] and clip.get("captions", True) is not False     # the style, and the captions switch
-    ass = build_ass(words if show_caps else [], start, end, clip.get("hook", ""), look["cap"], clip.get("highlight_words", []),
-                    hook_y, cap_y, note=extras.get("note", ""), info=info, show_hook=look["hook"]["show"],
-                    hook_look=look["hook"], script=clip.get("script") or "")
-    # The clip is made in a short work folder and moved into place afterwards. The caption step of ffmpeg cannot
-    # open files whose full path is longer than 260 characters on Windows, which a data folder deep inside other
-    # folders easily reaches. Inside the work folder every name is short and relative (a drive colon would also
-    # break the filter syntax).
-    work = Path(tempfile.mkdtemp(prefix="pk"))
-    try:
-        # The title and description are also written into the file itself, for any place that reads them from it.
-        meta = {"title": clip.get("title") or "", "description": clip.get("description") or "", "comment": clip.get("description") or ""}
-        got = _render_in(work, src, out_dir, name, start, end, layout, fg_h, ass, look, cam, crop, face, info, extras, meta)
-        return dict(got, layout=layout)
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
+    return {"look": look, "layout": layout, "fg_h": fg_h, "hook_y": hook_y, "cap_y": cap_y, "cam": cam, "crop": crop,
+            "face": face, "adjust": adjust_of(clip, look),
+            # whether the picture has a cam of its own, apart from the main picture (its own adjustments then)
+            "has_cam": bool(cam or face)}
 
 
-def _render_in(work: Path, src: Path, out_dir: Path, name: str, start, end, layout, fg_h, ass: str, look, cam, crop, face,
-               info, extras, meta) -> dict:
-    (work / f"{name}.ass").write_text(ass, encoding="utf-8")
-    (work / "f").mkdir()
-    for f in config.FONTS_DIR.glob("*.ttf"):
-        shutil.copyfile(f, work / "f" / f.name)
-    more, last, n, frame = [], "v1", 1, {}
+def _video(work: Path, name: str, layout, fg_h, look, cam, crop, face, adjust) -> tuple:
+    """(extra ffmpeg inputs, filter graph ending in [v0], next input number): the picture before captions."""
+    more, n, frame = [], 1, {}
     if cam:                                              # the cam's rounded corners and border: pictures, as inputs
         for k, f in cam_frame(cam, look.get("cam_style"), work, name).items():
             more += ["-loop", "1", "-i", f.name]
             frame[k] = n
             n += 1
+    main, camf = adjust_filter((adjust or {}).get("main")), adjust_filter((adjust or {}).get("cam"))
     if cam:
-        fc = cam_filter(cam, layout, fg_h, crop, frame)
+        fc = cam_filter(cam, layout, fg_h, crop, frame, main, camf)
     else:
-        fc = _filter(layout, fg_h, face).replace("[0:v]", "[0:v]" + crop, 1)
+        fc = _filter(layout, fg_h, face, main, camf).replace("[0:v]", "[0:v]" + crop, 1)
+    return more, fc, n
+
+
+PREVIEW_W, PREVIEW_H = 540, 960
+
+
+def preview_frame(src: Path, clip: dict, src_w: int, src_h: int, extras: dict, t: float, out: Path) -> Path:
+    """One picture of the clip at `t` seconds into the source, as it is made (picture adjustments included), without
+    captions or heading, half size: quick enough to follow sliders."""
+    pl = plan(clip, src_w, src_h, extras)
+    work = Path(tempfile.mkdtemp(prefix="pkp"))
+    try:
+        more, fc, _n = _video(work, "p", pl["layout"], pl["fg_h"], pl["look"], pl["cam"], pl["crop"], pl["face"], pl["adjust"])
+        fc += f"[v0]scale={PREVIEW_W}:{PREVIEW_H}[vp]"
+        run(["ffmpeg", "-y", "-v", "error", "-ss", f"{max(0.0, t):.2f}", "-i", str(src), *more, "-filter_complex", fc,
+             "-map", "[vp]", "-frames:v", "1", "-q:v", "4", "p.jpg"], cwd=work)
+        shutil.move(str(work / "p.jpg"), str(out))
+        return out
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _render_in(work: Path, src: Path, out_dir: Path, name: str, start, end, layout, fg_h, ass: str, look, cam, crop, face,
+               info, extras, meta, adjust=None) -> dict:
+    (work / f"{name}.ass").write_text(ass, encoding="utf-8")
+    (work / "f").mkdir()
+    for f in config.FONTS_DIR.glob("*.ttf"):
+        shutil.copyfile(f, work / "f" / f.name)
+    more, fc, n = _video(work, name, layout, fg_h, look, cam, crop, face, adjust)
+    last = "v1"
     fc += f"[v0]ass={name}.ass:fontsdir=f[v1]"
     logo = extras.get("logo")
     if logo and Path(logo.get("path", "")).is_file():

@@ -2274,6 +2274,14 @@ textarea.cpg-in{height:auto;padding:8px 12px;resize:vertical}.cpg-in:focus{borde
 .scr-dlg{max-width:620px;width:100%}.scr-lines{display:grid;gap:6px;margin:12px 0;max-height:46vh;overflow:auto;padding-right:4px}
 .scr-line{display:flex;align-items:center;gap:10px}.scr-t{flex:none;width:40px;font-size:12px;font-weight:600;color:var(--dim);font-variant-numeric:tabular-nums}
 .scr-line input{flex:1;min-width:0}
+.adj-dlg{max-width:760px;width:100%}.adj-body{display:grid;grid-template-columns:216px 1fr;gap:20px;margin-top:12px}
+.adj-pv{position:relative;width:216px;height:384px;border-radius:var(--r-sm);overflow:hidden;background:#111}
+.adj-pv img{width:100%;height:100%;display:block;object-fit:cover}.adj-pv .adj-busy{position:absolute;right:6px;top:6px;font-size:11px;background:rgba(0,0,0,.6);color:#fff;padding:1px 6px;border-radius:99px}
+.adj-sl{display:grid;gap:8px}.adj-row{display:grid;grid-template-columns:110px 1fr 44px;align-items:center;gap:8px;font-size:14px}
+.adj-row input[type=range]{width:100%}.adj-row output{font-variant-numeric:tabular-nums;text-align:right;color:var(--dim);font-size:13px}
+.adj-row output.on{color:var(--brand-deep);font-weight:700}.adj-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.adj-time{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center;font-size:12px;color:var(--dim);margin-top:8px;width:216px}
+@media (max-width:640px){.adj-body{grid-template-columns:1fr}.adj-pv{margin:0 auto}.adj-time{margin:8px auto 0}}
 .img-dlg{max-width:600px}.img-main{display:flex;gap:18px;align-items:flex-start;margin:12px 0;flex-wrap:wrap}
 .img-stage{position:relative;flex:none;overflow:hidden;border-radius:var(--r-sm);background:#1d1410;touch-action:none}
 .img-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.9;pointer-events:none}
@@ -4321,6 +4329,75 @@ async function screenDialog(jid, cid) {
   };
   d.showModal();
 }
+// ---- Adjust: the clip's picture, main and cam apart, with a live preview frame made by the server
+const ADJ_LABEL = {exposure: "Exposure", brightness: "Brightness", contrast: "Contrast", saturation: "Saturation", temp: "Warm / cool",
+                   sharpen: "Sharpen", shadows: "Shadows", highlights: "Highlights"};
+async function adjustDialog(jid, cid) {
+  let info;
+  const base = `/api/jobs/${encodeURIComponent(jid)}/clips/${encodeURIComponent(cid)}/adjust`;
+  try { info = await api(base); } catch (err) { return toast(err.message, "bad"); }
+  const cl = jobOf(jid)?.clips.find(x => x.id === cid), len = cl ? Math.max(1, cl.end - cl.start) : 30;
+  const st = {adj: JSON.parse(JSON.stringify(info.adjust)), part: "main", at: len * 0.4, before: false, seq: 0, timer: 0};
+  const zero = () => Object.fromEntries(Object.keys(info.adjust).map(p => [p, Object.fromEntries(info.keys.map(k => [k, 0]))]));
+  const d = $("#formdlg");
+  const sliders = () => info.keys.map(k => { const v = st.adj[st.part][k];
+    return `<label class="adj-row"><span>${ADJ_LABEL[k] || k}</span><input type="range" data-adj="${k}" min="${k === "sharpen" ? 0 : -100}" max="100" step="1" value="${v}" aria-label="${ADJ_LABEL[k] || k}"><output class="${v ? "on" : ""}">${v > 0 && k !== "sharpen" ? "+" : ""}${v}</output></label>`; }).join("");
+  const draw = () => {
+    d.querySelector("#adjsl").innerHTML = sliders();
+    d.querySelectorAll("[data-adjpart]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.adjpart === st.part)));
+  };
+  const preview = () => {                       // asked for once the sliders stop for a moment; older answers are dropped
+    clearTimeout(st.timer);
+    st.timer = setTimeout(async () => {
+      const n = ++st.seq, busy = d.querySelector(".adj-busy"); if (busy) busy.hidden = false;
+      try {
+        const r = await fetch(base + "/preview", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({adjust: st.before ? zero() : st.adj, at: st.at})});
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "Couldn't make a preview.");
+        const url = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); r.blob().then(b => fr.readAsDataURL(b)); });
+        if (n === st.seq && d.open) d.querySelector("#adjimg").src = url;
+      } catch (err) { if (n === st.seq) toast(err.message, "bad"); }
+      finally { if (n === st.seq && busy) busy.hidden = true; }
+    }, 160);
+  };
+  d.innerHTML = `<form method="dialog" class="dlg adj-dlg"><h2>Adjust the picture</h2>
+    <p class="help">Move the sliders and the picture updates. ${info.cam ? "The cam and the main picture are adjusted apart. " : ""}The clip is made again when you apply.${info.own ? "" : " These start from the clip's style."}</p>
+    <div class="adj-body"><div><div class="adj-pv"><img id="adjimg" alt="Preview of the clip"><span class="adj-busy">Updating…</span></div>
+      <label class="adj-time">Frame<input type="range" id="adjat" min="0" max="${len.toFixed(2)}" step="0.1" value="${st.at.toFixed(2)}" aria-label="Which moment of the clip to preview"></label></div>
+      <div>${info.cam ? `<div class="seg" role="group" aria-label="Part of the picture" style="margin-bottom:10px"><button type="button" data-adjpart="main" aria-pressed="true">Main picture</button><button type="button" data-adjpart="cam" aria-pressed="false">Cam</button></div>` : ""}
+        <div class="adj-sl" id="adjsl"></div>
+        <div class="adj-tools"><button type="button" class="btn sm ghost" data-adjtool="part">Reset ${info.cam ? "this part" : "all"}</button>
+          ${info.own ? `<button type="button" class="btn sm ghost" data-adjtool="style">Back to the style's</button>` : ""}
+          <label class="row" style="gap:6px;font-size:13px"><input type="checkbox" id="adjbefore">Show the original</label></div></div></div>
+    <div class="dlg-foot"><span class="grow"></span><button class="btn" value="no">Cancel</button><button class="btn primary" value="yes">${ic("scissors")}Apply and re-make</button></div></form>`;
+  draw();
+  d.oninput = e => {
+    const t = e.target;
+    if (t.dataset.adj) { const v = Number(t.value); st.adj[st.part][t.dataset.adj] = v; const o = t.nextElementSibling; o.textContent = (v > 0 && t.dataset.adj !== "sharpen" ? "+" : "") + v; o.classList.toggle("on", !!v); preview(); }
+    if (t.id === "adjat") { st.at = Number(t.value); preview(); }
+  };
+  d.onchange = e => { if (e.target.id === "adjbefore") { st.before = e.target.checked; preview(); } };
+  d.onclick = e => {
+    const pb = e.target.closest("[data-adjpart]"); if (pb) { st.part = pb.dataset.adjpart; draw(); return; }
+    const tb = e.target.closest("[data-adjtool]"); if (!tb) return;
+    if (tb.dataset.adjtool === "part") { st.adj[st.part] = zero()[st.part]; if (!info.cam) st.adj = zero(); }
+    if (tb.dataset.adjtool === "style") { st.adj = JSON.parse(JSON.stringify(info.style)); st.useStyle = true; }
+    draw(); preview();
+  };
+  d.returnValue = "no";
+  d.onclose = async () => {
+    d.oninput = d.onchange = d.onclick = null; clearTimeout(st.timer); st.seq++;
+    if (d.returnValue !== "yes") return;
+    const same = JSON.stringify(st.adj) === JSON.stringify(info.adjust);
+    if (same && !st.useStyle) return toast("Nothing was changed.");
+    const styleSame = JSON.stringify(st.adj) === JSON.stringify(info.style);
+    try {
+      await send(base, {adjust: st.useStyle && styleSame ? null : st.adj}, "PUT");
+      toast("Applied. The clip is being made again.", "ok");
+      await tick(); render();
+    } catch (err) { toast(err.message, "bad"); }
+  };
+  d.showModal(); preview();
+}
 function imageDialog(pairs) {
   if (!pairs.length) return toast("Select finished clips first.", "bad");
   const d = $("#formdlg"), st = {file: "", url: "", ar: 1, x: 0.75, y: 0.15, w: 0.3, full: false};
@@ -6256,7 +6333,10 @@ function drawClipDlg(full) {
           ${c.status === "done" ? (c.checks || []).map(x => `<p class="hq-note bad">${ic("warn")}${esc(x.text)}</p>`).join("") : ""}</div>` : ""}
         ${c.status === "done" ? `<div class="ce3-f"><label>On-screen text</label><div class="row" style="gap:8px;align-items:center">
           <button type="button" class="btn sm" data-act="cdscreen" data-j="${esc(j.id)}" data-c="${esc(c.id)}">Fix heading or captions</button>
-          <span class="sub">When the words on the video are wrong</span></div></div>` : ""}
+          <span class="sub">When the words on the video are wrong</span></div></div>
+          <div class="ce3-f"><label>Picture</label><div class="row" style="gap:8px;align-items:center">
+          <button type="button" class="btn sm" data-act="cdadjust" data-j="${esc(j.id)}" data-c="${esc(c.id)}">${ic("sliders")}Adjust</button>
+          <span class="sub">${c.adjust && Object.keys(c.adjust).length ? "Adjusted · " : ""}Exposure, brightness, colour, sharpness</span></div></div>` : ""}
         <div class="ce3-line"></div>
         <div id="dposts"></div>
         ${c.status !== "done" ? `<p class="ce2-note">${c.status === "error" ? "This clip couldn't be made, so it can't be posted." : "It can be posted once it's made."}</p>` : postSoon() ? soonBox() : accs.length ? (accs.every(gone) ? `<p class="ce2-note">It's going to every account you have.</p>` : `
@@ -6852,6 +6932,7 @@ document.addEventListener("click", async e => {
     if (a === "dlall") return zipDownload((jobOf(d.j)?.clips || []).filter(c => c.status === "done").map(c => d.j + "." + c.id));
     if (a === "seldl") return zipDownload(selClips());
     if (a === "cdscreen") return screenDialog(d.j, d.c);
+    if (a === "cdadjust") return adjustDialog(d.j, d.c);
     if (a === "selimage") return imageDialog(selClips().map(k => { const i = k.lastIndexOf("."); return [k.slice(0, i), k.slice(i + 1)]; }));
     if (a === "selclear") { sel().clear(); return render(); }
     if (a === "selall") {

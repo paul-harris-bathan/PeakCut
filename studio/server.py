@@ -1465,6 +1465,49 @@ def clip_screen_save(jid: str, cid: str, body: dict = Body(...)):
     return jobs.public(job)
 
 
+# ---- Adjust: a clip's picture (exposure, brightness, ...), for the main picture and the cam apart, with a live preview
+@app.get("/api/jobs/{jid}/clips/{cid}/adjust")
+def clip_adjust(jid: str, cid: str):
+    job, clip = _clip_or_404(jid, cid)
+    return jobs.adjust_info(job, clip)
+
+
+@app.post("/api/jobs/{jid}/clips/{cid}/adjust/preview")
+def clip_adjust_preview(jid: str, cid: str, body: dict = Body(...)):
+    """A small picture of the clip with these settings, as it would be made (no captions)."""
+    job, clip = _clip_or_404(jid, cid)
+    _throttle("adjprev:" + ctx.uid(), 900, 600, "That's a lot of previews in a short time. Wait a minute.")
+    at = body.get("at")
+    try:
+        at = float(at) if at is not None else None
+    except (TypeError, ValueError):
+        at = None
+    try:
+        jpg = jobs.preview_frame(job, clip, templates.clean_adjust(body.get("adjust")), at)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)[:300])
+    except Exception:  # noqa: BLE001 - ffmpeg couldn't make the picture
+        raise HTTPException(500, "Couldn't make a preview of this clip.")
+    return Response(jpg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@app.put("/api/jobs/{jid}/clips/{cid}/adjust")
+def clip_adjust_save(jid: str, cid: str, body: dict = Body(...)):
+    """Make the clip again with these picture settings ("adjust": null: back to its style's)."""
+    job, clip = _clip_or_404(jid, cid)
+    if "adjust" not in body or not (body["adjust"] is None or isinstance(body["adjust"], dict)):
+        raise HTTPException(400, "Nothing to change.")
+    if job["status"] in ("queued", "running") or clip.get("status") in ("queued", "rendering"):
+        raise HTTPException(409, "This clip is still being made. Try again when it has finished.")
+    _throttle("render:" + ctx.uid(), 20, 600, "That's a lot of re-makes in a short time. Wait a few minutes.")
+    try:
+        jobs.request_render(jid, cid, {"adjust": body["adjust"]})
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e))
+    ctx.bump()
+    return jobs.public(job)
+
+
 @app.put("/api/jobs/{jid}/clips/{cid}/text")
 def clip_text(jid: str, cid: str, body: dict = Body(...)):
     """Save a clip's title, description and hashtags. The video is not made again."""
