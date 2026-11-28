@@ -2274,7 +2274,10 @@ textarea.cpg-in{height:auto;padding:8px 12px;resize:vertical}.cpg-in:focus{borde
 .scr-dlg{max-width:620px;width:100%}.scr-lines{display:grid;gap:6px;margin:12px 0;max-height:46vh;overflow:auto;padding-right:4px}
 .scr-line{display:flex;align-items:center;gap:10px}.scr-t{flex:none;width:40px;font-size:12px;font-weight:600;color:var(--dim);font-variant-numeric:tabular-nums}
 .scr-line input{flex:1;min-width:0}
-.adj-dlg{max-width:760px;width:100%}.adj-body{display:grid;grid-template-columns:216px 1fr;gap:20px;margin-top:12px}
+.adj-dlg{max-width:760px;width:100%}
+.tpe-adj{display:grid;grid-template-columns:150px 1fr;gap:16px;margin-top:8px}.tpe-adjpv{width:150px;height:267px}
+.tpe-adjnone{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:10px;font-size:12px;color:#fff;background:#222}
+@media (max-width:900px){.tpe-adj{grid-template-columns:1fr}.tpe-adjpv{margin:0 auto}}.adj-body{display:grid;grid-template-columns:216px 1fr;gap:20px;margin-top:12px}
 .adj-pv{position:relative;width:216px;height:384px;border-radius:var(--r-sm);overflow:hidden;background:#111}
 .adj-pv img{width:100%;height:100%;display:block;object-fit:cover}.adj-pv .adj-busy{position:absolute;right:6px;top:6px;font-size:11px;background:rgba(0,0,0,.6);color:#fff;padding:1px 6px;border-radius:99px}
 .adj-sl{display:grid;gap:8px}.adj-row{display:grid;grid-template-columns:110px 1fr 44px;align-items:center;gap:8px;font-size:14px}
@@ -5870,7 +5873,7 @@ function drawTplEditor(body) {
       <input class="tpe-name" id="tpe_name" maxlength="40" value="${esc(E.name)}" aria-label="Style name" placeholder="Style name">
       <span class="grow"></span><button class="btn ghost" data-act="tplvideo">${ic("film")}Preview video</button><button class="btn primary" data-act="tplsave">${ic("check")}Save changes</button></div>
     <div class="tpe-body"><div class="tpe-l"><div class="tpe-stage" id="tpestage"></div><p class="tpe-hint">Drag the captions or the heading to move them.</p></div>
-      <div class="tpe-r"><div class="seg tpe-tabs" role="tablist">${[["captions", "Captions"], ["heading", "Heading"], ["layout", "Layout"]].map(([k, l]) =>
+      <div class="tpe-r"><div class="seg tpe-tabs" role="tablist">${[["captions", "Captions"], ["heading", "Heading"], ["layout", "Layout"], ["picture", "Picture"]].map(([k, l]) =>
         `<button type="button" role="tab" data-act="tpltab" data-k="${k}" aria-pressed="${E.tab === k}">${l}</button>`).join("")}</div><div id="tpectl"></div></div></div></div>`;
   tplPaint(); tplCtl();
 }
@@ -5936,6 +5939,19 @@ function tplCtl() {
         ${range("hook.outline", "Outline", 0, 14, h.outline ?? (h.bg ? 0 : 6), v => v ? v : "None")}</div>
       <div class="tpe-sec"><h4>Size and letters</h4>${range("hook.size", "Size", 60, 160, h.size || 96, v => v < 85 ? "Small" : v < 115 ? "Medium" : "Large")}${toggle("hook.upper", "Capital letters", !!h.upper)}</div>
       <div class="tpe-sec"><h4>Place</h4>${place("hook.y", h.y)}</div>` : ""}`;
+  } else if (E.tab === "picture") {
+    // picture settings new clips in this style start with: the main picture and the cam apart, previewed on the
+    // preview video by the server, made exactly as a clip would be
+    const keys = Object.keys(ADJ_LABEL), part = E.adjPart && E.look.cam ? E.adjPart : "main";
+    E.look.adjust ||= {main: Object.fromEntries(keys.map(k => [k, 0])), cam: Object.fromEntries(keys.map(k => [k, 0]))};
+    const A = E.look.adjust[part], any = ["main", "cam"].some(p => keys.some(k => E.look.adjust[p]?.[k]));
+    box.innerHTML = `<div class="tpe-sec"><h4>Picture</h4><p class="tpe-note">New clips in this style start with these settings. You can still change each clip with Adjust.${E.look.cam ? " The cam and the main picture are set apart." : ""}</p>
+        ${E.look.cam ? `<div class="seg" style="margin:8px 0"><button type="button" data-act="tpladjpart" data-k="main" aria-pressed="${part === "main"}">Main picture</button><button type="button" data-act="tpladjpart" data-k="cam" aria-pressed="${part === "cam"}">Cam</button></div>` : ""}
+        <div class="tpe-adj"><div class="adj-pv tpe-adjpv"><img id="tpeadjimg" alt="Preview with these settings"><span class="adj-busy" hidden>Updating…</span><span class="tpe-adjnone" hidden></span></div>
+        <div class="adj-sl">${keys.map(k => { const v = A[k] || 0;
+          return `<label class="adj-row"><span>${ADJ_LABEL[k]}</span><input type="range" data-ta="${part}.${k}" min="${k === "sharpen" ? 0 : -100}" max="100" step="1" value="${v}" aria-label="${ADJ_LABEL[k]}"><output class="${v ? "on" : ""}">${v > 0 && k !== "sharpen" ? "+" : ""}${v}</output></label>`; }).join("")}
+          <div class="adj-tools"><button type="button" class="btn sm ghost" data-act="tpladjreset">Reset ${E.look.cam ? "this part" : "all"}</button>${any ? `<span class="sub">Clips made in this style get these.</span>` : ""}</div></div></div></div>`;
+    tplAdjPreview();
   } else {
     const lay = Object.entries(S.tpl.layouts || {}).map(([k, l]) => tile("layout", k, `${tplPrev({...E.look, layout: k, hook: {...E.look.hook, show: false}, cap: {...c, y: null}}, {mini: true})}<em>${esc(l)}</em>`, E.look.layout === k)).join("");
     E.look.cam_style ||= {r: 0, bw: 0, bc: "FFFFFF"};
@@ -5956,6 +5972,28 @@ function tplCtl() {
         ${E.look.game_src ? srcPic("game", E.look.game_src, "Video") : ""}</div>`;
   }
 }
+function tplAdjPreview() {
+  // asked for once the sliders stop for a moment; older answers are dropped
+  const E = S.tplEdit; if (!E || E.tab !== "picture") return;
+  clearTimeout(S.tpeAdjT);
+  S.tpeAdjT = setTimeout(async () => {
+    const n = (S.tpeAdjN = (S.tpeAdjN || 0) + 1), busy = $(".tpe-adjpv .adj-busy"), none = $(".tpe-adjnone"); if (busy) busy.hidden = false;
+    try {
+      const r = await fetch("/api/templates/preview", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({look: E.look})});
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "Couldn't make a preview.");
+      const url = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); r.blob().then(b => fr.readAsDataURL(b)); });
+      const img = $("#tpeadjimg"); if (n === S.tpeAdjN && img) { img.src = url; if (none) none.hidden = true; }
+    } catch (err) { if (n === S.tpeAdjN && none) { none.hidden = false; none.textContent = err.message; } }
+    finally { if (n === S.tpeAdjN && busy) busy.hidden = true; }
+  }, 160);
+}
+document.addEventListener("input", e => {
+  const t = e.target; if (!t.dataset?.ta || !S.tplEdit) return;
+  const [part, k] = t.dataset.ta.split("."), v = Number(t.value);
+  S.tplEdit.look.adjust[part][k] = v; S.tplEdit.dirty = true;
+  const o = t.nextElementSibling; o.textContent = (v > 0 && k !== "sharpen" ? "+" : "") + v; o.classList.toggle("on", !!v);
+  tplAdjPreview();
+});
 function tplSet(path, v) {
   const ks = path.split("."), last = ks.pop(), o = ks.reduce((x, k) => x[k], S.tplEdit.look);
   o[last] = v; S.tplEdit.dirty = true; tplPaint();
@@ -6130,6 +6168,10 @@ async function tplAct(a, d) {
     drawTplTab(); return toast(`${t.name} deleted.`, "ok");
   }
   if (a === "tplpick") return tplPickDlg(d.for, !!d.made);
+  if (a === "tpladjpart" && S.tplEdit) { S.tplEdit.adjPart = d.k; return tplCtl(); }
+  if (a === "tpladjreset" && S.tplEdit) { const E = S.tplEdit, part = E.adjPart && E.look.cam ? E.adjPart : "main";
+    for (const p of E.look.cam ? [part] : ["main", "cam"]) Object.keys(E.look.adjust[p]).forEach(k => { E.look.adjust[p][k] = 0; });
+    E.dirty = true; return tplCtl(); }
   if (a === "cbopts") { S.cbOpen = !S.cbOpen; b.setAttribute("aria-expanded", String(S.cbOpen)); return slide($("#campbar .cb-panel"), S.cbOpen); }
   if (a === "cbsave") {            // the streamer's clip settings: on its campaign when one is in use, else on the streamer
     const c = creator(), cur = (S.mc.list || []).find(e => e.key === c?.campaign_use); if (!c) return;
