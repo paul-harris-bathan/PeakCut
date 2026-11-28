@@ -114,6 +114,7 @@ def clean_look(raw) -> dict:
     cam_style = {"r": _num(cs.get("r"), 0, 50, 0), "bw": _num(cs.get("bw"), 0, 24, 0), "bc": _hex(cs.get("bc"), "FFFFFF")}
     return {"cap": cap, "hook": hook, "cam": _cam(raw.get("cam")), "cam_style": cam_style, "cam_src": facecam.clean(raw.get("cam_src")),
             "game_src": facecam.clean(raw.get("game_src")),
+            "adjust": clean_adjust(raw.get("adjust")),      # picture settings new clips in this style start with
             "layout": raw.get("layout") if raw.get("layout") in LAYOUTS else "blur"}
 
 
@@ -449,6 +450,23 @@ def sample_cam():
         cam = None
     f.write_text(json.dumps({"cam": cam}), encoding="utf-8")
     return cam
+
+
+def preview_adjust(look: dict, out: Path, t: float = 3.0) -> Path:
+    """A picture of the preview video in this look, picture settings included, as a clip would be made (no captions):
+    for the style editor's Picture tab."""
+    from . import media, render
+    mp4, _jpg = sample()
+    if not mp4 or not Path(mp4).is_file():
+        raise FileNotFoundError("No preview video yet")
+    st = (json.loads(media.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,duration",
+                                "-of", "json", str(mp4)], timeout=30)).get("streams") or [{}])[0]
+    w, h = int(st.get("width") or 0), int(st.get("height") or 0)
+    dur = float(st.get("duration") or 10)
+    look = clean_look(look)
+    cam = sample_cam() if look.get("cam") and not look.get("cam_src") else None
+    clip = {"start": 0.0, "end": dur, "look": look, "layout": look["layout"], "style": "bounce"}
+    return render.preview_frame(Path(mp4), clip, w, h, {"cam": cam} if cam else {}, min(t, max(0.0, dur - 0.2)), out)
 
 
 def label(tid) -> str:

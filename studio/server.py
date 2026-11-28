@@ -13,6 +13,7 @@ import shutil
 import threading
 import time
 import traceback
+import uuid
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -1989,6 +1990,22 @@ def style_sample(ext: str):
         raise HTTPException(404, "No sample yet")
     f = mp4 if ext == "mp4" else jpg if ext == "jpg" else jpg.with_name("style-sample-blur.jpg")
     return FileResponse(f, media_type="video/mp4" if ext == "mp4" else "image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.post("/api/templates/preview")
+def style_preview(body: dict = Body(...)):
+    """The style editor's Picture tab: a picture of the preview video with this look's picture settings."""
+    _throttle("adjprev:" + ctx.uid(), 900, 600, "That's a lot of previews in a short time. Wait a minute.")
+    out = config.user_dir(ctx.uid()) / f"style-adjust-{uuid.uuid4().hex[:8]}.jpg"
+    try:
+        templates.preview_adjust(body.get("look") or {}, out, float(body.get("at") or 3))
+        return Response(out.read_bytes(), media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+    except FileNotFoundError:
+        raise HTTPException(404, "Make clips from a video first. Its preview plays in every style.")
+    except Exception:  # noqa: BLE001
+        raise HTTPException(500, "Couldn't make a preview with these settings.")
+    finally:
+        out.unlink(missing_ok=True)
 
 
 @app.post("/api/templates/sample/cam")

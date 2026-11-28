@@ -133,5 +133,33 @@ for x in (clip, two):
 c.post("/api/clips/adjust", json={"clips": pairs[:2], "adjust": None}, headers=H)
 check("many: back to the style's takes each clip's own settings off", ("adjust" in clip, "adjust" in two), (False, False))
 
+# ---- picture settings in a style: new clips start with them, a clip's own win
+check("a look keeps its picture settings (held in range)", templates.clean_look({"adjust": {"main": {"exposure": 300}}})["adjust"]["main"]["exposure"], 100)
+check("a look without any has none", templates.clean_look({})["adjust"], None)
+r = c.post("/api/templates", json={"name": "Bright", "look": dict(look, adjust={"main": {"exposure": 40}, "cam": {"temp": 30}})}, headers=H)
+tid = r.json()["saved"]
+with ctx.as_user(u):
+    saved = templates.get(tid)
+check("a saved style keeps its picture settings", (saved["look"]["adjust"]["main"]["exposure"], saved["look"]["adjust"]["cam"]["temp"]), (40, 30))
+clip.update(status="done")
+clip.pop("adjust", None)
+job["clips"] = [clip]
+c.post("/api/clips/style", json={"clips": [[job["id"], "clip01"]], "template": tid}, headers=H)
+check("a clip made in the style is made with its picture settings", render.plan(clip, 1280, 720)["adjust"]["main"]["exposure"], 40)
+clip["status"] = "done"
+check("the clip's Adjust panel starts from the style's", (c.get(B).json()["adjust"]["main"]["exposure"], c.get(B).json()["style"]["cam"]["temp"], c.get(B).json()["own"]), (40, 30, False))
+c.put(B, json={"adjust": {"main": {"exposure": -20}}}, headers=H)
+check("the clip's own settings win over the style's", render.plan(clip, 1280, 720)["adjust"]["main"]["exposure"], -20)
+clip["status"] = "done"
+c.put(B, json={"adjust": {}}, headers=H)
+check("a clip set to nothing is made with nothing, whatever its style has", render.plan(clip, 1280, 720)["adjust"], None)
+with ctx.as_user(u):
+    mp4, _ = templates.sample()
+r = c.post("/api/templates/preview", json={"look": dict(look, adjust={"main": {"brightness": 60}})}, headers=H)
+check("the style editor's preview is a picture of the preview video", (r.status_code, r.headers.get("content-type"), r.content[:2]), (200, "image/jpeg", bytes([0xFF, 0xD8])))
+dark = c.post("/api/templates/preview", json={"look": dict(look, adjust={"main": {"brightness": -60}})}, headers=H)
+check("...with the settings on it", luma(r.content, MAIN) - luma(dark.content, MAIN), lambda x: x > 20)
+check("previews from another website are refused", c.post("/api/templates/preview", json={}, headers={"Origin": "https://evil.example"}).status_code, 403)
+
 print(f"{len(fails)} failed" if fails else "ALL PASSED")
 sys.exit(1 if fails else 0)
