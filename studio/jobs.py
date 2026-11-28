@@ -598,6 +598,7 @@ def adjust_info(job, clip) -> dict:
     cam_known = (look or {}).get("cam_src") or (who or {}).get("cam") or job.get("cam_src")      # where the cam is in the video
     has_cam = bool((look or {}).get("cam") and cam_known) or (clip.get("layout") == "gameplay" and bool(clip.get("facecam")))
     return {"adjust": (own or zero) if "adjust" in clip else (style or zero), "style": style or zero, "own": "adjust" in clip, "cam": has_cam,
+            "chat": bool((look or {}).get("chat") and (look or {}).get("chat_src")),
             "keys": list(templates.ADJUST_KEYS)}
 
 

@@ -2120,6 +2120,11 @@ textarea.cpg-in{height:auto;padding:8px 12px;resize:vertical}.cpg-in:focus{borde
 .rs{position:absolute;width:14px;height:14px;background:#fff;border:2px solid currentColor;border-radius:4px;touch-action:none;z-index:2}
 .rs.nw{left:-1px;top:-1px;cursor:nwse-resize}.rs.ne{right:-1px;top:-1px;cursor:nesw-resize}
 .rs.sw{left:-1px;bottom:-1px;cursor:nesw-resize}.rs.se{right:-1px;bottom:-1px;cursor:nwse-resize}
+.rs.n,.rs.s{left:calc(50% - 9px);width:18px;height:8px;border-radius:3px}.rs.n{top:-1px;cursor:ns-resize}.rs.s{bottom:-1px;cursor:ns-resize}
+.rs.e,.rs.w{top:calc(50% - 9px);width:8px;height:18px;border-radius:3px}.rs.e{right:-1px;cursor:ew-resize}.rs.w{left:-1px;cursor:ew-resize}
+.tp9-cam.tp9-chat{z-index:2;background:rgba(14,116,144,.6)}.tp9-cam.tp9-chat .rs,.camf-box.chat{color:#0E7490}
+.tp9-cam.tp9-game{z-index:0;border-radius:0}.tp9-cam.tp9-game .rs,.camf-box.game{color:var(--brand)}
+.tp9-chatph{font:700 3.4cqw/1.3 system-ui,sans-serif;text-align:left;padding:2cqw;align-self:stretch;opacity:.9}
 .camf-box{color:var(--brand)}.camf-box.cam{color:#7C3AED}.tp9-cam .rs{color:#7C3AED}
 
 .tp9.f-cam .tp9-cam{outline:1px dashed rgba(255,255,255,.9);outline-offset:-5px}
@@ -4343,8 +4348,9 @@ async function adjustDialog(jid, cid, many) {
   try { info = await api(url(targets[0])); } catch (err) { return toast(err.message, "bad"); }
   const lenOf = ([j, c]) => { const cl = jobOf(j)?.clips.find(x => x.id === c); return cl ? Math.max(1, cl.end - cl.start) : 30; };
   const st = {adj: JSON.parse(JSON.stringify(info.adjust)), part: "main", i: 0, at: lenOf(targets[0]) * 0.4, before: false, seq: 0, timer: 0};
-  const zero = () => Object.fromEntries(["main", "cam"].map(p => [p, Object.fromEntries(info.keys.map(k => [k, 0]))]));
-  const showCam = bulk || info.cam;            // many clips: the cam settings go to those that have a cam
+  const zero = () => Object.fromEntries(["main", "cam", "chat"].map(p => [p, Object.fromEntries(info.keys.map(k => [k, 0]))]));
+  const showCam = bulk || info.cam, showChat = bulk || info.chat;   // many clips: those settings go to the clips that have one
+  for (const p of ["main", "cam", "chat"]) st.adj[p] ||= zero()[p];
   const d = $("#formdlg");
   const sliders = () => info.keys.map(k => { const v = st.adj[st.part][k];
     return `<label class="adj-row"><span>${ADJ_LABEL[k] || k}</span><input type="range" data-adj="${k}" min="${k === "sharpen" ? 0 : -100}" max="100" step="1" value="${v}" aria-label="${ADJ_LABEL[k] || k}"><output class="${v ? "on" : ""}">${v > 0 && k !== "sharpen" ? "+" : ""}${v}</output></label>`; }).join("");
@@ -4367,13 +4373,13 @@ async function adjustDialog(jid, cid, many) {
     }, 160);
   };
   d.innerHTML = `<form method="dialog" class="dlg adj-dlg"><h2>${bulk ? `Adjust ${targets.length} clips` : "Adjust the picture"}</h2>
-    <p class="help">${bulk ? `All ${targets.length} clips get exactly these settings, replacing what each had. The cam settings go to the clips that have a cam. ` : `Move the sliders and the picture updates. ${info.cam ? "The cam and the main picture are adjusted apart. " : ""}`}The clip${bulk ? "s are" : " is"} made again when you apply.${bulk || info.own ? "" : " These start from the clip's style."}</p>
+    <p class="help">${bulk ? `All ${targets.length} clips get exactly these settings, replacing what each had. The cam and chat settings go to the clips that have one. ` : `Move the sliders and the picture updates. ${info.cam ? "The cam and the main picture are adjusted apart. " : ""}`}The clip${bulk ? "s are" : " is"} made again when you apply.${bulk || info.own ? "" : " These start from the clip's style."}</p>
     <div class="adj-body"><div><div class="adj-pv"><img id="adjimg" alt="Preview of the clip"><span class="adj-busy">Updating…</span></div>
       ${bulk ? `<div class="row adj-time" style="grid-template-columns:auto 1fr auto"><button type="button" class="btn sm icon ghost" data-adjclip="-1" aria-label="Previous clip">‹</button><span id="adjwhich" style="text-align:center"></span><button type="button" class="btn sm icon ghost" data-adjclip="1" aria-label="Next clip">›</button></div>` : ""}
       <label class="adj-time">Frame<input type="range" id="adjat" min="0" max="${lenOf(targets[0]).toFixed(2)}" step="0.1" value="${st.at.toFixed(2)}" aria-label="Which moment of the clip to preview"></label></div>
-      <div>${showCam ? `<div class="seg" role="group" aria-label="Part of the picture" style="margin-bottom:10px"><button type="button" data-adjpart="main" aria-pressed="true">Main picture</button><button type="button" data-adjpart="cam" aria-pressed="false">Cam</button></div>` : ""}
+      <div>${showCam || showChat ? `<div class="seg" role="group" aria-label="Part of the picture" style="margin-bottom:10px"><button type="button" data-adjpart="main" aria-pressed="true">Main picture</button>${showCam ? `<button type="button" data-adjpart="cam" aria-pressed="false">Cam</button>` : ""}${showChat ? `<button type="button" data-adjpart="chat" aria-pressed="false">Chat</button>` : ""}</div>` : ""}
         <div class="adj-sl" id="adjsl"></div>
-        <div class="adj-tools"><button type="button" class="btn sm ghost" data-adjtool="part">Reset ${showCam ? "this part" : "all"}</button>
+        <div class="adj-tools"><button type="button" class="btn sm ghost" data-adjtool="part">Reset ${showCam || showChat ? "this part" : "all"}</button>
           ${bulk || info.own ? `<button type="button" class="btn sm ghost" data-adjtool="style">Back to the style's</button>` : ""}
           <label class="row" style="gap:6px;font-size:13px"><input type="checkbox" id="adjbefore">Show the original</label></div></div></div>
     <div class="dlg-foot"><span class="grow"></span><button class="btn" value="no">Cancel</button><button class="btn primary" value="yes">${ic("scissors")}Apply${bulk ? ` to ${targets.length} clips` : " and re-make"}</button></div></form>`;
@@ -4390,7 +4396,7 @@ async function adjustDialog(jid, cid, many) {
     if (cb) { st.i = (st.i + Number(cb.dataset.adjclip) + targets.length) % targets.length; const L = lenOf(targets[st.i]);
       const at = d.querySelector("#adjat"); at.max = L.toFixed(2); st.at = Math.min(st.at, L - 0.1); at.value = st.at; draw(); preview(); return; }
     const tb = e.target.closest("[data-adjtool]"); if (!tb) return;
-    if (tb.dataset.adjtool === "part") { st.adj[st.part] = zero()[st.part]; if (!showCam) st.adj = zero(); st.useStyle = false; }
+    if (tb.dataset.adjtool === "part") { st.adj[st.part] = zero()[st.part]; if (!showCam && !showChat) st.adj = zero(); st.useStyle = false; }
     if (tb.dataset.adjtool === "style") { st.adj = bulk ? zero() : JSON.parse(JSON.stringify(info.style)); st.useStyle = true; }
     draw(); preview();
   };
@@ -5560,6 +5566,7 @@ const TPL_WORDS = ["no", "way", "he", "actually", "did", "that", "bro", "this", 
 // the captions sit on the line between, and the heading goes in the game
 function tplGeo(look) {
   const g = {...campGeo(look.layout)}, m = look.cam;
+  if (look.layout === "custom") return {top: 0, h: 1920, hook: 300, cap: 1380, custom: true};
   if (!m) return g;
   const stack = m.w >= 99.6 && (m.y <= 0.3 || m.y + m.h >= 99.7);
   if (!stack) return g;
@@ -5645,7 +5652,9 @@ function tplPrev(look, o = {}) {
   // the fill behind the video is a picture blurred on the server: blurring in the browser made long pages lag
   const fill = `<div class="tp9-fill" style="background-image:url('${tplSrc("blur.jpg")}')"></div>`;
   const vb = o.edit ? ' data-pick="video" data-name="Video"' : "";
-  const band = g.stack ? `<div class="tp9-band" style="top:${pct(g.top)};height:${pct(g.h)}"${vb}>${mov}</div>`
+  const gm = look.game || {x: 0, y: 0, w: 100, h: 100};
+  const band = g.custom ? `${fill}<div class="tp9-cam real tp9-game${o.edit ? " drag" : ""}" data-drag="game" data-name="Gameplay" style="left:${gm.x}%;top:${gm.y}%;width:${gm.w}%;height:${gm.h}%">${o.video ? tplVid(gv) : pic}${o.mini ? "" : "<b>Gameplay</b>"}${o.edit ? RS : ""}</div>`
+    : g.stack ? `<div class="tp9-band" style="top:${pct(g.top)};height:${pct(g.h)}"${vb}>${mov}</div>`
     : look.layout === "crop" ? `<div class="tp9-band full"${vb}>${mov}</div>` : `${fill}<div class="tp9-band" style="top:${pct(g.top)};height:${pct(g.h)}"${vb}>${mov}</div>`;
   // the cam box: the real cam from the preview video (where it was drawn, else where it was found), else a placeholder;
   // it plays only in the editor (a page of styles shows its first picture, to stay light)
@@ -5654,13 +5663,17 @@ function tplPrev(look, o = {}) {
   // corners: % of the cam box's shorter side (50: fully round), as the clip draws them
   const cs = look.cam_style || {}, cst = (cs.r && m ? `border-radius:${tplPx(Math.min(cs.r, 50) / 100 * Math.min(m.w * 10.8, m.h * 19.2))};` : "") + (cs.bw ? `--cb:inset 0 0 0 ${tplPx(cs.bw)} #${cs.bc || "FFFFFF"};` : "");
   const cam = m ? `<div class="tp9-cam${o.edit ? " drag" : ""}${g.stack ? " stack" : ""}${real ? " real" : ""}${cs.r || cs.bw ? " styled" : ""}" data-drag="cam" data-name="Streamer cam" style="left:${m.x}%;top:${m.y}%;width:${m.w}%;height:${m.h}%;${cst}">${real || CAM_ART}${o.mini ? "" : "<b>Streamer cam</b>"}${o.edit ? `${RS}` : ""}</div>` : "";
+  // the chat box: the part of the preview video drawn as the chat, else a stand-in; its corners, border and see-through
+  const ch = look.chat, chs = look.chat_style || {}, csrc = look.chat_src;
+  const chst = ch ? (chs.r ? `border-radius:${tplPx(Math.min(chs.r, 50) / 100 * Math.min(ch.w * 10.8, ch.h * 19.2))};` : "") + (chs.bw ? `--cb:inset 0 0 0 ${tplPx(chs.bw)} #${chs.bc || "FFFFFF"};` : "") + `opacity:${(chs.op || 100) / 100};` : "";
+  const chatEl = ch ? `<div class="tp9-cam tp9-chat${o.edit ? " drag" : ""}${csrc ? " real" : ""}${chs.r || chs.bw ? " styled" : ""}" data-drag="chat" data-name="Chat" style="left:${ch.x}%;top:${ch.y}%;width:${ch.w}%;height:${ch.h}%;${chst}">${csrc ? (o.video === "full" ? tplVid(tplInset(csrc)) : `<img src="${tplSrc("jpg")}" alt="" decoding="async" style="${tplInset(csrc)}">`) : `<span class="tp9-chatph">user1: LOL<br>user2: no way<br>user3: KEKW</span>`}${o.mini ? "" : "<b>Chat</b>"}${o.edit ? RS : ""}</div>` : "";
   const hf = h.font || "Poppins ExtraBold", hst = `top:${pct(hookY)};font-family:'pcf ${esc(hf)}',sans-serif;font-size:${tplPx((h.size || 96) * (S.tpl.hk?.[hf] || 1) * (S.tpl.em?.[hf] || .57))};color:#${h.color || "0E1014"};`
     + (h.bg === false ? "background:none;" : `background:#${h.bgc || "FFFFFF"};`)
     + ((h.outline ?? (h.bg === false ? 6 : 0)) ? `-webkit-text-stroke:${tplPx((h.outline ?? 6) * 2)} #000;paint-order:stroke fill;` : "-webkit-text-stroke:0;");
   const hook = h.show ? `<div class="tp9-hook${o.edit ? " drag" : ""}" data-drag="hook" data-name="Heading" style="${hst}">${o.mini ? "" : h.upper ? "HE ACTUALLY DID IT 😭" : "he actually did it 😭"}</div>` : "";
   if (o.play) S.tplPlay[o.play] = look;
   const n = Math.max(1, Math.min(look.cap.per, 5)), group = o.play ? Math.floor(performance.now() / 1000 / TPL_STEP / n) : null;
-  return `<div class="tp9${o.mini ? " mini" : ""}${o.focus ? " f-" + o.focus : ""}"${o.play ? ` data-play="${esc(o.play)}"` : ""}>${band}${cam}${hook}${tplCap(look, {...o, group})}${o.edit ? `<div class="tp9-guide" hidden></div>` : ""}</div>`;
+  return `<div class="tp9${o.mini ? " mini" : ""}${o.focus ? " f-" + o.focus : ""}"${o.play ? ` data-play="${esc(o.play)}"` : ""}>${band}${cam}${chatEl}${hook}${tplCap(look, {...o, group})}${o.edit ? `<div class="tp9-guide" hidden></div>` : ""}</div>`;
 }
 // One clock for every preview on the page: the words move on every TPL_STEP seconds, and the sample videos are
 // kept at the same point, so a page of styles plays as one.
@@ -5882,7 +5895,7 @@ function tplPaint() {
   const focus = E.tab === "heading" ? "hook" : E.tab === "captions" ? "cap" : "video";
   const old = st.querySelector(".tp9"), vid = st.querySelector("video.tpv");
   // the same layout: only the words and the heading change, so the video keeps playing
-  const key = E.look.layout + JSON.stringify([E.look.cam, E.look.cam_style, E.look.cam_src, E.look.game_src]);
+  const key = E.look.layout + JSON.stringify([E.look.cam, E.look.cam_style, E.look.cam_src, E.look.game_src, E.look.game, E.look.chat, E.look.chat_src, E.look.chat_style]);
   if (old && old.dataset.layout === key) {   // (the loop redraws the captions on its next frame)
     const fresh = document.createElement("div"); fresh.innerHTML = tplPrev(E.look, {edit: true, play: "edit", focus});
     const n = fresh.firstElementChild;
@@ -5942,15 +5955,17 @@ function tplCtl() {
   } else if (E.tab === "picture") {
     // picture settings new clips in this style start with: the main picture and the cam apart, previewed on the
     // preview video by the server, made exactly as a clip would be
-    const keys = Object.keys(ADJ_LABEL), part = E.adjPart && E.look.cam ? E.adjPart : "main";
-    E.look.adjust ||= {main: Object.fromEntries(keys.map(k => [k, 0])), cam: Object.fromEntries(keys.map(k => [k, 0]))};
-    const A = E.look.adjust[part], any = ["main", "cam"].some(p => keys.some(k => E.look.adjust[p]?.[k]));
-    box.innerHTML = `<div class="tpe-sec"><h4>Picture</h4><p class="tpe-note">New clips in this style start with these settings. You can still change each clip with Adjust.${E.look.cam ? " The cam and the main picture are set apart." : ""}</p>
-        ${E.look.cam ? `<div class="seg" style="margin:8px 0"><button type="button" data-act="tpladjpart" data-k="main" aria-pressed="${part === "main"}">Main picture</button><button type="button" data-act="tpladjpart" data-k="cam" aria-pressed="${part === "cam"}">Cam</button></div>` : ""}
+    const keys = Object.keys(ADJ_LABEL), parts = ["main", ...(E.look.cam ? ["cam"] : []), ...(E.look.chat ? ["chat"] : [])];
+    const part = parts.includes(E.adjPart) ? E.adjPart : "main", zeros = () => Object.fromEntries(keys.map(k => [k, 0]));
+    E.look.adjust ||= {};
+    for (const pp of ["main", "cam", "chat"]) E.look.adjust[pp] ||= zeros();
+    const A = E.look.adjust[part], any = ["main", "cam", "chat"].some(pp => keys.some(k => E.look.adjust[pp]?.[k]));
+    box.innerHTML = `<div class="tpe-sec"><h4>Picture</h4><p class="tpe-note">New clips in this style start with these settings. You can still change each clip with Adjust.${parts.length > 1 ? " Each part is set apart." : ""}</p>
+        ${parts.length > 1 ? `<div class="seg" style="margin:8px 0">${parts.map(pp => `<button type="button" data-act="tpladjpart" data-k="${pp}" aria-pressed="${part === pp}">${{main: "Main picture", cam: "Cam", chat: "Chat"}[pp]}</button>`).join("")}</div>` : ""}
         <div class="tpe-adj"><div class="adj-pv tpe-adjpv"><img id="tpeadjimg" alt="Preview with these settings"><span class="adj-busy" hidden>Updating…</span><span class="tpe-adjnone" hidden></span></div>
         <div class="adj-sl">${keys.map(k => { const v = A[k] || 0;
           return `<label class="adj-row"><span>${ADJ_LABEL[k]}</span><input type="range" data-ta="${part}.${k}" min="${k === "sharpen" ? 0 : -100}" max="100" step="1" value="${v}" aria-label="${ADJ_LABEL[k]}"><output class="${v ? "on" : ""}">${v > 0 && k !== "sharpen" ? "+" : ""}${v}</output></label>`; }).join("")}
-          <div class="adj-tools"><button type="button" class="btn sm ghost" data-act="tpladjreset">Reset ${E.look.cam ? "this part" : "all"}</button>${any ? `<span class="sub">Clips made in this style get these.</span>` : ""}</div></div></div></div>`;
+          <div class="adj-tools"><button type="button" class="btn sm ghost" data-act="tpladjreset">Reset ${parts.length > 1 ? "this part" : "all"}</button>${any ? `<span class="sub">Clips made in this style get these.</span>` : ""}</div></div></div></div>`;
     tplAdjPreview();
   } else {
     const lay = Object.entries(S.tpl.layouts || {}).map(([k, l]) => tile("layout", k, `${tplPrev({...E.look, layout: k, hook: {...E.look.hook, show: false}, cap: {...c, y: null}}, {mini: true})}<em>${esc(l)}</em>`, E.look.layout === k)).join("");
@@ -5967,6 +5982,18 @@ function tplCtl() {
         ${m ? `<p class="tpe-note tpe-gap">Where's the cam in the stream?</p>
         <div class="seg"><button type="button" data-act="tplcsrc" data-k="ai" aria-pressed="${!E.look.cam_src}">AI picks it</button><button type="button" data-act="tplcsrc" data-k="draw" aria-pressed="${!!E.look.cam_src}">Draw it</button></div>
         ${E.look.cam_src ? srcPic("cam", E.look.cam_src, "Cam") : aiPic()}` : ""}</div>
+      ${E.look.layout === "custom" ? `<div class="tpe-sec"><h4>Gameplay box</h4><p class="tpe-note">Drag the gameplay box on the preview. Pull a corner or a side to change its shape: the picture fills it and the extra is cut, never squashed. Pick what it shows under "Part of the video".</p>
+        <div class="tpe-cam">${[["full", "Whole screen"], ["middle", "Middle"], ["bottom", "Bottom"]].map(([k, l]) => `<button type="button" class="btn sm" data-act="tplgame" data-k="${k}">${l}</button>`).join("")}</div></div>` : ""}
+      <div class="tpe-sec" id="tpe-chat"><h4>Chat</h4>${E.look.chat ? `<p class="tpe-note">The chat goes in this box. Drag it on the preview, pull a corner or a side to resize it. Draw where the chat is in the stream below.</p>
+        <div class="tpe-cam">${[["tr", "Top right"], ["bottom", "Bottom"], ["side", "Right side"]].map(([k, l]) => `<button type="button" class="btn sm" data-act="tplchat" data-k="${k}">${l}</button>`).join("")}<span class="grow"></span><button type="button" class="btn sm ghost" data-act="tplchat" data-k="off">${ic("trash")}Remove</button></div>
+        ${range("chat_style.op", "See-through", 10, 100, E.look.chat_style.op, v => Number(v) >= 100 ? "Solid" : (100 - Number(v)) + "%")}
+        ${range("chat_style.r", "Rounded corners", 0, 50, E.look.chat_style.r, v => Number(v) >= 50 ? "Round" : Number(v) ? v + "%" : "None")}
+        ${range("chat_style.bw", "Border", 0, 24, E.look.chat_style.bw, v => v ? v + " px" : "None")}
+        ${E.look.chat_style.bw ? colors("chat_style.bc", "Border colour") : ""}
+        ${toggle("chat_style.key", "Remove the chat's background", E.look.chat_style.key)}
+        ${E.look.chat_style.key ? `${colors("chat_style.kc", "Background colour")}${range("chat_style.ks", "How much", 5, 60, E.look.chat_style.ks, v => v)}<p class="tpe-note">Works best on a plain dark chat panel. See it exactly in the Picture tab.</p>` : ""}
+        ${srcPic("chat", E.look.chat_src, "Chat")}`
+        : `<p class="tpe-note">Put the stream's chat in the clip, in a box you place. You draw where the chat is in the stream.</p><button type="button" class="btn" data-act="tplchat" data-k="tr">${ic("plus")}Add chat box</button>`}</div>
       <div class="tpe-sec" id="tpe-part"><h4>Part of the video</h4><p class="tpe-note">Zoomed-in stream, or only one part matters? Draw the part to show.</p>
         <div class="seg"><button type="button" data-act="tplgsrc" data-k="all" aria-pressed="${!E.look.game_src}">All of it</button><button type="button" data-act="tplgsrc" data-k="part" aria-pressed="${!!E.look.game_src}">Pick a part</button></div>
         ${E.look.game_src ? srcPic("game", E.look.game_src, "Video") : ""}</div>`;
@@ -5987,6 +6014,13 @@ function tplAdjPreview() {
     finally { if (n === S.tpeAdjN && busy) busy.hidden = true; }
   }, 160);
 }
+document.addEventListener("input", e => {         // the chat box's sliders: their labels, and the border colour row
+  const t = e.target; if (!S.tplEdit || !String(t.dataset?.tr || "").startsWith("chat_style.")) return;
+  const v = Number(t.value), b = t.nextElementSibling, k = t.dataset.tr.split(".")[1];
+  if (b && k === "op") b.textContent = v >= 100 ? "Solid" : (100 - v) + "%";
+  if (b && k === "ks") b.textContent = v;
+  if (k === "bw" && (v === 0) === !!document.querySelector('[data-tf="chat_style.bc"]')) tplCtl();
+});
 document.addEventListener("input", e => {
   const t = e.target; if (!t.dataset?.ta || !S.tplEdit) return;
   const [part, k] = t.dataset.ta.split("."), v = Number(t.value);
@@ -6037,6 +6071,8 @@ document.addEventListener("pointerdown", e => {
 // Where a drawn part of the video lands in the clip (in 1080x1920 pixels): the cam's box, or the game's area.
 function tplDest(kind, look, b) {
   if (kind === "cam") { const m = look.cam || {w: 100, h: 40}; return [m.w * 10.8, m.h * 19.2]; }
+  if (kind === "chat") { const m = look.chat || {w: 40, h: 25}; return [m.w * 10.8, m.h * 19.2]; }
+  if (look.layout === "custom") { const m = look.game || {w: 100, h: 100}; return [m.w * 10.8, m.h * 19.2]; }
   const g = tplGeo(look);
   if (g.stack || look.layout === "crop") return [1080, g.stack ? g.h : 1920];
   if (look.layout === "zoom") return [1080, 1000];
@@ -6063,7 +6099,7 @@ function aiPic() {
     <button type="button" class="btn sm ghost" data-act="tplvideo">${ic("film")}Change preview video</button></div>`;
 }
 // the handles on a box's four corners (nw, ne, sw, se): pull one to resize from that corner
-const RS = ["nw", "ne", "sw", "se"].map(k => `<i class="rs ${k}" data-rs="${k}"></i>`).join("");
+const RS = ["nw", "ne", "sw", "se", "n", "s", "e", "w"].map(k => `<i class="rs ${k}" data-rs="${k}"></i>`).join("");
 function boxDrag(e, el, frame, box, done, {minW = 15, minH = 8, onMove = null} = {}) {
   e.preventDefault(); e.stopPropagation();
   const r = frame.getBoundingClientRect(), x0 = e.clientX, y0 = e.clientY, b0 = {...box};
@@ -6093,7 +6129,7 @@ function boxDrag(e, el, frame, box, done, {minW = 15, minH = 8, onMove = null} =
 }
 document.addEventListener("pointerdown", e => {       // the boxes drawn on the video (Layout tab)
   const el = e.target.closest(".tpe-src .camf-box"); if (!el || !S.tplEdit) return;
-  const k = el.dataset.src === "cam" ? "cam_src" : "game_src", b = S.tplEdit.look[k], box = {x: b.x * 100, y: b.y * 100, w: b.w * 100, h: b.h * 100};
+  const k = el.dataset.src === "cam" ? "cam_src" : el.dataset.src === "chat" ? "chat_src" : "game_src", b = S.tplEdit.look[k], box = {x: b.x * 100, y: b.y * 100, w: b.w * 100, h: b.h * 100};
   const frac = v => ({x: v.x / 100, y: v.y / 100, w: v.w / 100, h: v.h / 100}), fit = el.querySelector(".fit");
   boxDrag(e, el, el.parentElement, box, v => { S.tplEdit.look[k] = frac(v); S.tplEdit.dirty = true; tplPaint(); },
     {minW: 4, minH: 4, onMove: v => { if (fit) fit.style.cssText = fitStyle(tplFit(el.dataset.src, S.tplEdit.look, frac(v))); }});
@@ -6101,9 +6137,12 @@ document.addEventListener("pointerdown", e => {       // the boxes drawn on the 
 document.addEventListener("pointerdown", e => {
   const el = e.target.closest("#tpestage .tp9-cam"); if (!el || !S.tplEdit) return;
   if (S.tplEdit.tab !== "layout") { S.tplEdit.tab = "layout"; $$(".tpe-tabs button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.k === "layout"))); tplCtl(); }
-  boxDrag(e, el, $("#tpestage .tp9"), S.tplEdit.look.cam, () => { S.tplEdit.dirty = true; tplPaint(); tplCtl(); }, {onMove: () => {
-    const cb = $(".tpe-src .camf-box.cam"), f = cb?.querySelector(".fit");
-    if (f && S.tplEdit.look.cam_src) f.style.cssText = fitStyle(tplFit("cam", S.tplEdit.look, S.tplEdit.look.cam_src)); }});
+  const L = S.tplEdit.look, kind = el.dataset.drag || "cam";
+  if (kind === "game") L.game ||= {x: 0, y: 0, w: 100, h: 100};
+  const srcKey = {cam: "cam_src", chat: "chat_src", game: "game_src"}[kind], lim = {cam: [15, 8], chat: [8, 5], game: [10, 5]}[kind];
+  boxDrag(e, el, $("#tpestage .tp9"), L[kind], () => { S.tplEdit.dirty = true; tplPaint(); tplCtl(); }, {minW: lim[0], minH: lim[1], onMove: () => {
+    const cb = $(`.tpe-src .camf-box.${kind}`), f = cb?.querySelector(".fit");
+    if (f && L[srcKey]) f.style.cssText = fitStyle(tplFit(kind, L, L[srcKey])); }});
 }, true);
 // a click on the video in the preview: the Layout tab, at "Part of the video"
 document.addEventListener("click", e => {
@@ -6113,7 +6152,7 @@ document.addEventListener("click", e => {
 });
 // dragging the captions or the heading up and down the preview; they snap to the top, middle and bottom guides
 document.addEventListener("pointerdown", e => {
-  const el = e.target.closest("#tpestage [data-drag]"); if (!el || !S.tplEdit || el.dataset.drag === "cam") return;
+  const el = e.target.closest("#tpestage [data-drag]"); if (!el || !S.tplEdit || ["cam", "chat", "game"].includes(el.dataset.drag)) return;
   const tab = el.dataset.drag === "hook" ? "heading" : "captions";
   if (S.tplEdit.tab !== tab) { S.tplEdit.tab = tab; $$(".tpe-tabs button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.k === tab))); tplCtl(); $("#tpestage .tp9").className = "tp9 f-" + (tab === "heading" ? "hook" : "cap"); }
   e.preventDefault();
@@ -6168,9 +6207,18 @@ async function tplAct(a, d) {
     drawTplTab(); return toast(`${t.name} deleted.`, "ok");
   }
   if (a === "tplpick") return tplPickDlg(d.for, !!d.made);
+  if (a === "tplchat" && S.tplEdit) {             // the chat box: added, moved to a ready spot, or taken off
+    const L = S.tplEdit.look, at = {tr: {x: 56, y: 4, w: 40, h: 26}, bottom: {x: 4, y: 70, w: 92, h: 18}, side: {x: 62, y: 30, w: 34, h: 40}};
+    if (d.k === "off") { L.chat = null; L.chat_src = null; }
+    else { L.chat = {...at[d.k]}; L.chat_src ||= {x: 0.76, y: 0.12, w: 0.23, h: 0.7}; L.chat_style ||= {r: 0, bw: 0, bc: "FFFFFF", op: 100, key: false, kc: "000000", ks: 25}; }
+    S.tplEdit.dirty = true; tplPaint(); return tplCtl(); }
+  if (a === "tplgame" && S.tplEdit) {             // the Custom layout's gameplay box at a ready spot
+    S.tplEdit.look.game = {full: {x: 0, y: 0, w: 100, h: 100}, middle: {x: 0, y: 28, w: 100, h: 44}, bottom: {x: 0, y: 50, w: 100, h: 50}}[d.k];
+    S.tplEdit.dirty = true; tplPaint(); return tplCtl(); }
   if (a === "tpladjpart" && S.tplEdit) { S.tplEdit.adjPart = d.k; return tplCtl(); }
-  if (a === "tpladjreset" && S.tplEdit) { const E = S.tplEdit, part = E.adjPart && E.look.cam ? E.adjPart : "main";
-    for (const p of E.look.cam ? [part] : ["main", "cam"]) Object.keys(E.look.adjust[p]).forEach(k => { E.look.adjust[p][k] = 0; });
+  if (a === "tpladjreset" && S.tplEdit) { const E = S.tplEdit, parts = ["main", ...(E.look.cam ? ["cam"] : []), ...(E.look.chat ? ["chat"] : [])];
+    const part = parts.includes(E.adjPart) ? E.adjPart : "main";
+    for (const p of parts.length > 1 ? [part] : ["main", "cam", "chat"]) Object.keys(E.look.adjust[p] || {}).forEach(k => { E.look.adjust[p][k] = 0; });
     E.dirty = true; return tplCtl(); }
   if (a === "cbopts") { S.cbOpen = !S.cbOpen; b.setAttribute("aria-expanded", String(S.cbOpen)); return slide($("#campbar .cb-panel"), S.cbOpen); }
   if (a === "cbsave") {            // the streamer's clip settings: on its campaign when one is in use, else on the streamer

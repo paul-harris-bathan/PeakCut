@@ -165,8 +165,8 @@ def install_fonts():
 LAYOUTS = {"blur": "Full frame + blurred fill", "zoom": "Zoomed in + blurred fill", "crop": "Fill the screen (centre crop)",
            "left": "Fill the screen, keep the left side", "right": "Fill the screen, keep the right side",
            "fit": "Full frame on black", "split": "Split screen: left half on top, right half below (two people)",
-           "gameplay": "Gameplay fills the screen, facecam in the corner"}
-_FILLS = ("crop", "left", "right", "gameplay")      # layouts where the picture covers the whole frame
+           "gameplay": "Gameplay fills the screen, facecam in the corner", "custom": "Custom: every box placed by hand"}
+_FILLS = ("crop", "left", "right", "gameplay", "custom")      # layouts where the picture covers the whole frame
 
 
 def _ts(t):
@@ -198,7 +198,7 @@ def _groups(words, per):
 
 def geometry(src_w, src_h, layout):
     """Where the video sits in the 1080x1920 frame, and where hook and captions go."""
-    if src_h >= src_w and layout != "crop":
+    if src_h >= src_w and layout not in ("crop", "custom"):
         layout = "crop"  # already vertical or square: nothing to gain from a blurred fill
     if layout not in LAYOUTS:
         layout = "blur"
@@ -594,7 +594,70 @@ def needed_height(look, cam_src=None, aspect=16 / 9) -> int:
     if cam:
         box = cam_src or {"w": 0.22, "h": 0.22}
         need = max(need, want(box["w"], box["h"], cam["bw"], cam["bh"]))
+    for dst, src in ((look.get("chat"), look.get("chat_src")), (look.get("game") if look["layout"] == "custom" else None, gs)):
+        p = box_plan(dst, src, 1920, 1080) if dst and src else None
+        if p:
+            need = max(need, want(src["w"], src["h"], p["bw"], p["bh"]))
     return next((q for q in QUALITIES if q >= need), QUALITIES[-1])
+
+
+def box_plan(dst, src_box, src_w, src_h):
+    """A part of the source (src_box: shares of its frame) placed in a box of the clip (dst: shares of the 9:16 frame,
+    0-100), filling it: the chat box, the cam and the gameplay of the Custom layout. Never stacked. None without both."""
+    p = cam_plan(dst, src_box, src_w, src_h)
+    if not p:
+        return None
+    if p["stack"]:                       # cam_plan widened it to the frame: keep the box exactly as it was drawn
+        p["bx"], p["by"], p["bw"], p["bh"] = (_even(W * dst["x"] / 100) if dst["x"] else 0, _even(H * dst["y"] / 100) if dst["y"] else 0,
+                                              _even(W * dst["w"] / 100), _even(H * dst["h"] / 100))
+        p["bw"], p["bh"] = min(p["bw"], W - p["bx"]), min(p["bh"], H - p["by"])
+    p["stack"] = False
+    return p
+
+
+def _part(inp, base, p, adj, frame, out, tail="", tag="p"):
+    """Filters that put one part of the source in its box over `base`: cut out, adjusted, filling its box (the extra
+    is cut, never squashed), then `tail` (e.g. its background taken out, see-through), its rounded corners (a mask
+    multiplied into whatever see-through it already has) and its border. Ends in [out]."""
+    fps, t = config.OUT_FPS, tag
+    f = (f"[{inp}]fps={fps},format=yuv420p,crop={p['sw']}:{p['sh']}:{p['sx']}:{p['sy']},{adj}"
+         f"scale={p['bw']}:{p['bh']}:force_original_aspect_ratio=increase,crop={p['bw']}:{p['bh']},setsar=1,format=rgba{tail}[{t}a];")
+    last = f"{t}a"
+    if "mask" in frame:
+        f += (f"[{t}a]split[{t}b][{t}c];[{t}c]alphaextract[{t}d];[{frame['mask']}:v]format=gray,scale={p['bw']}:{p['bh']}[{t}m];"
+              f"[{t}d][{t}m]blend=all_mode=multiply[{t}e];[{t}b][{t}e]alphamerge[{t}f];")
+        last = f"{t}f"
+    if "border" in frame:
+        f += f"[{base}][{last}]overlay={p['bx']}:{p['by']}:shortest=1[{t}g];[{t}g][{frame['border']}:v]overlay={p['bx']}:{p['by']}:shortest=1[{out}];"
+    else:
+        f += f"[{base}][{last}]overlay={p['bx']}:{p['by']}:shortest=1[{out}];"
+    return f
+
+
+def chat_tail(style) -> str:
+    """The chat box's own look, after it is cut out: its background colour taken out, and how see-through it is."""
+    st, out = style or {}, ""
+    if st.get("key"):
+        out += f",colorkey=0x{st.get('kc') or '000000'}:{max(5, min(60, int(st.get('ks') or 25))) / 100:.2f}:0.08"
+    op = int(st.get("op") or 100)
+    if op < 100:
+        out += f",colorchannelmixer=aa={op / 100:.2f}"
+    return out
+
+
+def custom_filter(game, crop, main, cam=None, camf="", cam_frame_in=None):
+    """The Custom layout: the gameplay (the part of the video shown, `crop`) blurred behind everything, the gameplay in
+    its own box, and the cam in its box. Ends in [v0]."""
+    fps = config.OUT_FPS
+    n = 3 if cam else 2
+    f = (f"[0:v]split={n}" + "".join(f"[k{i}]" for i in range(n)) + ";"
+         f"[k0]{crop}{main}fps={fps},scale=270:480:force_original_aspect_ratio=increase,crop=270:480,boxblur=6:2,"
+         f"scale={W}:{H},eq=brightness=-0.14:saturation=1.15,setsar=1[kbg];"
+         f"[k1]{crop}{main}fps={fps},format=yuv420p,scale={game['bw']}:{game['bh']}:force_original_aspect_ratio=increase,"
+         f"crop={game['bw']}:{game['bh']},setsar=1[kg];[kbg][kg]overlay={game['bx']}:{game['by']}:shortest=1[kv];")
+    if cam:
+        return f + _part("k2", "kv", cam, camf, cam_frame_in or {}, "v0", tag="kc")
+    return f.replace("[kv];", "[v0];")
 
 
 def cam_frame(cam, look_style, out_dir: Path, name: str) -> dict:
@@ -705,7 +768,8 @@ def render_clip(src: Path, out_dir: Path, name: str, clip: dict, words: list, sr
     try:
         # The title and description are also written into the file itself, for any place that reads them from it.
         meta = {"title": clip.get("title") or "", "description": clip.get("description") or "", "comment": clip.get("description") or ""}
-        got = _render_in(work, src, out_dir, name, start, end, layout, fg_h, ass, look, cam, crop, face, info, extras, meta, adjust=pl["adjust"])
+        got = _render_in(work, src, out_dir, name, start, end, layout, fg_h, ass, look, cam, crop, face, info, extras, meta,
+                         adjust=pl["adjust"], game=pl["game"], chat=pl["chat"])
         return dict(got, layout=layout)
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -728,6 +792,11 @@ def plan(clip: dict, src_w: int, src_h: int, extras: dict = None) -> dict:
         crop = f"crop={gw}:{gh}:{gx}:{gy},"
     layout, fg_h, hook_y, cap_y = geometry(gw if gs else src_w, gh if gs else src_h, look["layout"])
     cam = cam_plan(look.get("cam"), look.get("cam_src") or extras.get("cam"), src_w, src_h)   # drawn on the style, else found
+    game = None
+    if layout == "custom":                # every box where it was drawn; the gameplay (the part shown) in its own box
+        cam = box_plan(look.get("cam"), look.get("cam_src") or extras.get("cam"), src_w, src_h)
+        game = box_plan(look.get("game") or {"x": 0, "y": 0, "w": 100, "h": 100}, gs or {"x": 0, "y": 0, "w": 1.0, "h": 1.0}, src_w, src_h)
+    chat = box_plan(look.get("chat"), look.get("chat_src"), src_w, src_h)     # the chat, drawn by hand on the style
     # The gameplay layout: the webcam (found in pixels of the source, clip["facecam"]) in the top corner of the game,
     # and the heading just below it. With a style's own cam box, that box is used instead.
     face = clip.get("facecam") if layout == "gameplay" and not cam and not gs else None
@@ -742,12 +811,12 @@ def plan(clip: dict, src_w: int, src_h: int, extras: dict = None) -> dict:
     if look["hook"]["y"] is not None:
         hook_y = int(H * look["hook"]["y"] / 100)
     return {"look": look, "layout": layout, "fg_h": fg_h, "hook_y": hook_y, "cap_y": cap_y, "cam": cam, "crop": crop,
-            "face": face, "adjust": adjust_of(clip, look),
+            "face": face, "adjust": adjust_of(clip, look), "game": game, "chat": chat,
             # whether the picture has a cam of its own, apart from the main picture (its own adjustments then)
             "has_cam": bool(cam or face)}
 
 
-def _video(work: Path, name: str, layout, fg_h, look, cam, crop, face, adjust) -> tuple:
+def _video(work: Path, name: str, layout, fg_h, look, cam, crop, face, adjust, game=None, chat=None) -> tuple:
     """(extra ffmpeg inputs, filter graph ending in [v0], next input number): the picture before captions."""
     more, n, frame = [], 1, {}
     if cam:                                              # the cam's rounded corners and border: pictures, as inputs
@@ -756,10 +825,20 @@ def _video(work: Path, name: str, layout, fg_h, look, cam, crop, face, adjust) -
             frame[k] = n
             n += 1
     main, camf = adjust_filter((adjust or {}).get("main")), adjust_filter((adjust or {}).get("cam"))
-    if cam:
+    if layout == "custom" and game:
+        fc = custom_filter(game, crop, main, cam, camf, frame)
+    elif cam:
         fc = cam_filter(cam, layout, fg_h, crop, frame, main, camf)
     else:
         fc = _filter(layout, fg_h, face, main, camf).replace("[0:v]", "[0:v]" + crop, 1)
+    if chat:                                             # the chat box, over everything else
+        cframe = {}
+        for k, f in cam_frame(chat, look.get("chat_style"), work, name + "c").items():
+            more += ["-loop", "1", "-i", f.name]
+            cframe[k] = n
+            n += 1
+        fc = ("[0:v]split=2[in0][inc];" + fc.replace("[0:v]", "[in0]", 1)).replace("[v0];", "[vb];")
+        fc += _part("inc", "vb", chat, adjust_filter((adjust or {}).get("chat")), cframe, "v0", chat_tail(look.get("chat_style")), "ch")
     return more, fc, n
 
 
@@ -772,7 +851,8 @@ def preview_frame(src: Path, clip: dict, src_w: int, src_h: int, extras: dict, t
     pl = plan(clip, src_w, src_h, extras)
     work = Path(tempfile.mkdtemp(prefix="pkp"))
     try:
-        more, fc, _n = _video(work, "p", pl["layout"], pl["fg_h"], pl["look"], pl["cam"], pl["crop"], pl["face"], pl["adjust"])
+        more, fc, _n = _video(work, "p", pl["layout"], pl["fg_h"], pl["look"], pl["cam"], pl["crop"], pl["face"], pl["adjust"],
+                              pl["game"], pl["chat"])
         fc += f"[v0]scale={PREVIEW_W}:{PREVIEW_H}[vp]"
         run(["ffmpeg", "-y", "-v", "error", "-ss", f"{max(0.0, t):.2f}", "-i", str(src), *more, "-filter_complex", fc,
              "-map", "[vp]", "-frames:v", "1", "-q:v", "4", "p.jpg"], cwd=work)
@@ -783,12 +863,12 @@ def preview_frame(src: Path, clip: dict, src_w: int, src_h: int, extras: dict, t
 
 
 def _render_in(work: Path, src: Path, out_dir: Path, name: str, start, end, layout, fg_h, ass: str, look, cam, crop, face,
-               info, extras, meta, adjust=None) -> dict:
+               info, extras, meta, adjust=None, game=None, chat=None) -> dict:
     (work / f"{name}.ass").write_text(ass, encoding="utf-8")
     (work / "f").mkdir()
     for f in config.FONTS_DIR.glob("*.ttf"):
         shutil.copyfile(f, work / "f" / f.name)
-    more, fc, n = _video(work, name, layout, fg_h, look, cam, crop, face, adjust)
+    more, fc, n = _video(work, name, layout, fg_h, look, cam, crop, face, adjust, game, chat)
     last = "v1"
     fc += f"[v0]ass={name}.ass:fontsdir=f[v1]"
     logo = extras.get("logo")
