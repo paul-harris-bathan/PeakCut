@@ -93,6 +93,7 @@ def main() -> int:
                 ("chat spikes in a Twitch VOD: read, judged against the stream's normal, kept per user", ["tests/test_spikes.py"]),
                 ("spike clips: ElevenLabs words, the AI's cut, big spikes by themselves", ["tests/test_spikeclip.py"]),
                 ("spikes Twitch muted: marked, never clipped, asked again later", ["tests/test_spike_muted.py"]),
+                ("chat spikes in a past Kick stream: measured to the microsecond, stops if Kick refuses, filed by channel", ["tests/test_spikes_kick.py"]),
                 ("chat spikes in a past YouTube live stream: chat replay read by moment, plain refusals, filed by channel", ["tests/test_spikes_youtube.py"]),
                 ("a VOD's spike history: named before the scan, marked clipped, every clip listed, new style for ticked clips", ["tests/test_spike_history.py"]),
                 ("the streamer's cam found by the AI on real frames, checked", ["tests/test_facecam_ai.py"]),

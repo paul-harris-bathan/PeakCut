@@ -95,7 +95,7 @@ spikes.vod_info = lambda vid, client=None: {"id": vid, "title": "Big stream", "l
 spikes.sample = lambda vid, length, progress=None, client=None, workers=3: (progress and progress(1.0)) or list(r)
 
 check("a non-VOD link is refused with what to paste", c.post("/api/spikes", json={"url": "https://twitch.tv/caseoh_"}, headers=H).json().get("detail", ""),
-      lambda d: "Twitch VOD link" in d)
+      lambda d: "Twitch VOD" in d and "YouTube" in d and "kick.com" in d)
 check("starting from another website is refused", c.post("/api/spikes", json={"url": "2940013635"}, headers={"Origin": "https://evil.example"}).status_code, 403)
 r1 = c.post("/api/spikes", json={"url": "https://www.twitch.tv/videos/2940013635"}, headers=H)
 check("a scan starts with no AI key, and says what video it is", (r1.status_code, r1.json().get("title"), r1.json().get("status")), (200, "Big stream", "scanning"))
