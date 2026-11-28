@@ -561,6 +561,11 @@ def request_render(jid, cid, changes: dict):
         new["template"] = ""
     if "hashtags" in changes:
         new["hashtags"] = _tags(changes["hashtags"])
+    if "adjust" in changes:                          # picture adjustments for this clip; None: back to its style's
+        if changes["adjust"] is None:
+            new.pop("adjust", None)
+        else:
+            new["adjust"] = templates.clean_adjust(changes["adjust"]) or {}     # {}: nothing changed, even if the style has
     if "image" in changes:                           # Quick edit: a picture on the clip, or none
         from . import overlays
         if changes["image"]:
@@ -576,8 +581,50 @@ def request_render(jid, cid, changes: dict):
     clip.pop("draft", None)
     if "image" in changes and not changes["image"]:
         clip.pop("image", None)
+    if "adjust" in changes and changes["adjust"] is None:
+        clip.pop("adjust", None)
     save(job)
     _q.put(("clip", jid, cid))
+
+
+def adjust_info(job, clip) -> dict:
+    """For the clip's Adjust panel: the settings it is made with now (its own, else its style's), whether they are its
+    own, and whether it has a cam to adjust apart from the main picture."""
+    look = clip.get("look") if isinstance(clip.get("look"), dict) else None
+    style = templates.clean_adjust((look or {}).get("adjust"))
+    own = templates.clean_adjust(clip.get("adjust")) if "adjust" in clip else None
+    zero = {p: {k: 0 for k in templates.ADJUST_KEYS} for p in templates.ADJUST_PARTS}
+    who = creators.get(job["creator"]) if job.get("creator") else None
+    cam_known = (look or {}).get("cam_src") or (who or {}).get("cam") or job.get("cam_src")      # where the cam is in the video
+    has_cam = bool((look or {}).get("cam") and cam_known) or (clip.get("layout") == "gameplay" and bool(clip.get("facecam")))
+    return {"adjust": (own or zero) if "adjust" in clip else (style or zero), "style": style or zero, "own": "adjust" in clip, "cam": has_cam,
+            "keys": list(templates.ADJUST_KEYS)}
+
+
+def preview_frame(job, clip, adjust, at=None) -> bytes:
+    """A small picture of the clip as it would be made with these picture adjustments (no captions), `at` seconds into
+    it (else 40% in). Uses the cam box already known; never looks for one."""
+    off = clip.get("src_offset", 0.0)
+    src = Path(clip["src"]) if clip.get("src") else Path(job.get("source_path") or "")
+    if not src.is_file():
+        raise RuntimeError("The original video is no longer kept, so this clip can't be previewed or made again.")
+    who = creators.get(job["creator"]) if job.get("creator") else None
+    extras = {}
+    if isinstance(clip.get("look"), dict) and clip["look"].get("cam"):
+        box = clip["look"].get("cam_src") or (who or {}).get("cam") or job.get("cam_src")
+        if box:
+            extras["cam"] = box
+    local = dict(clip, start=clip["start"] - off, end=clip["end"] - off, adjust=adjust or {})
+    span = max(0.1, local["end"] - local["start"])
+    t = local["start"] + (min(span - 0.05, max(0.0, float(at))) if at is not None else span * 0.4)
+    d = Path(job["dir"]) / "clips"
+    d.mkdir(parents=True, exist_ok=True)
+    out = d / f"{clip['id']}.adj-{uuid.uuid4().hex[:8]}.jpg"
+    try:
+        render.preview_frame(src, local, int(job["width"]), int(job["height"]), extras, t, out)
+        return out.read_bytes()
+    finally:
+        out.unlink(missing_ok=True)
 
 
 # ---- On-screen text: the captions of a clip, to correct by hand, and the person's own words back

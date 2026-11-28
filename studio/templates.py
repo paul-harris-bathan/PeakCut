@@ -129,6 +129,23 @@ def _cam(v):
     return {"x": round(x, 1), "y": round(y, 1), "w": round(w, 1), "h": round(h, 1)}
 
 
+# Picture adjustments, for the main picture and for the streamer's cam apart: -100 to 100 each (0: unchanged), sharpen
+# 0 to 100. Kept on a clip ("adjust") and, later, in a style.
+ADJUST_KEYS = ("exposure", "brightness", "contrast", "saturation", "temp", "sharpen", "shadows", "highlights")
+ADJUST_PARTS = ("main", "cam")
+
+
+def clean_adjust(raw) -> dict | None:
+    """{"main": {...}, "cam": {...}} with every setting in range, or None when there is nothing to change."""
+    if not isinstance(raw, dict):
+        return None
+    out = {}
+    for part in ADJUST_PARTS:
+        got = raw.get(part) if isinstance(raw.get(part), dict) else {}
+        out[part] = {k: _num(got.get(k), 0 if k == "sharpen" else -100, 100, 0) for k in ADJUST_KEYS}
+    return out if any(v for p in out.values() for v in p.values()) else None
+
+
 def legacy(style="bounce", layout="blur") -> dict:
     """The look of a clip made before templates, from its caption style and layout."""
     return _look(LEGACY.get(style, LEGACY["bounce"]), layout if layout in LAYOUTS else "blur")

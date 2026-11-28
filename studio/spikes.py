@@ -206,7 +206,7 @@ def get(vid: str, sensitivity: float = 1.0) -> dict | None:
     f = _file(vid)
     if not f.is_file():
         return dict(live) if live else None
-    data = json.loads(f.read_text(encoding="utf-8"))
+    data = _read(f)
     _fresh_muted(vid, data)
     data["spikes"] = find(data.get("rates") or [], sensitivity, data.get("muted"))
     data["sensitivity"] = sensitivity
@@ -218,13 +218,24 @@ def get(vid: str, sensitivity: float = 1.0) -> dict | None:
 _muted_failed: dict = {}
 
 
+def _read(f: Path) -> dict:
+    """A scan file. Windows briefly refuses to open a file while it is being swapped for its new version: tried again."""
+    for i in range(6):
+        try:
+            return json.loads(f.read_text(encoding="utf-8"))
+        except PermissionError:
+            if i == 5:
+                raise
+            time.sleep(0.05 * (i + 1))
+
+
 def _save(vid: str, data: dict):
     tmp = _file(vid).with_suffix(".tmp")
     tmp.write_text(json.dumps(data), encoding="utf-8")
     tmp.replace(_file(vid))
 
 
-def _fresh_muted(vid: str, data: dict):
+def _fresh_muted(vid: str, data: dict, save: bool = True):
     """Ask Twitch which stretches are muted if the scan never did (made before this) or did a while ago. Kept with the
     scan. If Twitch doesn't answer, what was known is used, and it is asked again in a few minutes."""
     now = time.time()
@@ -234,6 +245,8 @@ def _fresh_muted(vid: str, data: dict):
         data["muted"], data["muted_at"] = muted(vid), now
     except Exception:  # noqa: BLE001 - the spikes still show, just without knowing what is muted
         _muted_failed[vid] = now
+        return
+    if not save:
         return
     keep = dict(data)
     for k in ("spikes", "sensitivity", "status", "progress", "error"):
@@ -292,7 +305,7 @@ def start(url: str, name: str = "") -> dict:
                 if not any(x for x in rates if x):
                     raise ValueError("Twitch has no chat for that video.")
                 data = dict(info, rates=rates, step=STEP, scanned=time.time(), status="done")
-                _fresh_muted(vid, data)            # which stretches Twitch muted (saved with the scan just below)
+                _fresh_muted(vid, data, save=False)   # which stretches Twitch muted (saved with the scan just below)
                 _save(vid, data)
                 _scans.pop((u, vid), None)
                 try:                               # only if PEAKCUT_SPIKE_AUTO_MAX is set: big spikes clipped by themselves
