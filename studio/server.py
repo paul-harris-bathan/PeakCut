@@ -2350,8 +2350,10 @@ def spike_start(body: dict = Body(...)):
         return spikes.start(str(body.get("url") or ""), str(body.get("name") or ""))
     except ValueError as e:
         raise HTTPException(400, str(e))
-    except Exception:  # noqa: BLE001 - Twitch didn't answer
-        raise HTTPException(502, "Twitch didn't answer. Try again in a minute.")
+    except media.YouTubeBlocked as e:
+        raise HTTPException(503, str(e))
+    except Exception:  # noqa: BLE001 - Twitch or YouTube didn't answer
+        raise HTTPException(502, "The site didn't answer. Try again in a minute.")
 
 
 @app.get("/api/spikes/{vid}")

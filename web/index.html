@@ -6664,7 +6664,9 @@ function spkTpl(d) {
   // the style the ticked spikes are made in: the one picked here, else the streamer's own, else the account's default
   if (SPK.tpl && tplOf(SPK.tpl)) return SPK.tpl;
   const login = (d.login || "").toLowerCase();
-  const c = login && S.creators.find(x => (String(x.channels?.twitch || x.channel || "").toLowerCase().split("twitch.tv/")[1] || "").split(/[/?#]/)[0] === login);
+  const yt = d.platform === "youtube", cid = String(d.channel_id || "").toLowerCase();
+  const c = yt ? S.creators.find(x => { const l = String(x.channels?.youtube || "").toLowerCase(); return (login && (l.split("/@")[1] || "").split(/[/?#]/)[0] === login) || (cid && l.includes(cid)); })
+    : login && S.creators.find(x => (String(x.channels?.twitch || x.channel || "").toLowerCase().split("twitch.tv/")[1] || "").split(/[/?#]/)[0] === login);
   return c && tplOf(c.template) ? c.template : S.tpl.default;
 }
 document.addEventListener("change", e => { if (e.target.id === "spk_tpl") SPK.tpl = e.target.value; });
@@ -6688,12 +6690,12 @@ function spkList(d) {
 function drawSpikes() {
   const box = $("#spk"); if (!box) return;
   const d = SPK.data, scanning = d && d.status === "scanning";
-  const head = `<section class="set-sec"><h2>Chat spikes</h2><p class="help">Paste a Twitch VOD link. PeakCut reads how fast chat was going across the whole video and shows where it spiked, measured against that stream's own normal chat. Nothing is downloaded but chat timings, and no AI is used.</p>
-    <form class="row spk-add" id="spkform"><input id="spkurl" placeholder="https://www.twitch.tv/videos/1234567890" spellcheck="false" aria-label="Twitch VOD link"><input id="spkname" class="spk-name" maxlength="100" placeholder="Name it (optional)" aria-label="Name for this VOD (optional)" title="Shown instead of the stream's Twitch title, on this page and on its clips' video"><button class="btn primary">${ic("search")}Find spikes</button></form></section>`;
+  const head = `<section class="set-sec"><h2>Chat spikes</h2><p class="help">Paste a Twitch VOD link or a past YouTube live stream. PeakCut reads how fast chat was going across the whole video and shows where it spiked, measured against that stream's own normal chat. Nothing is downloaded but chat timings, and no AI is used.</p>
+    <form class="row spk-add" id="spkform"><input id="spkurl" placeholder="Twitch VOD or YouTube stream link" spellcheck="false" aria-label="Twitch VOD or YouTube live stream link"><input id="spkname" class="spk-name" maxlength="100" placeholder="Name it (optional)" aria-label="Name for this VOD (optional)" title="Shown instead of the stream's own title, on this page and on its clips' video"><button class="btn primary">${ic("search")}Find spikes</button></form></section>`;
   const body = !d ? "" : d.status === "error" ? `<p class="hq-note bad">${ic("warn")}${esc(d.error || "The scan failed.")}</p>`
-    : scanning ? `<section class="set-sec"><h2>${esc(d.name || d.title || "Twitch video")}</h2><p class="sub">${esc(d.streamer)} · ${hms(d.length)}</p>
-        <div class="spk-prog"><i style="width:${Math.round((d.progress || 0) * 100)}%"></i></div><p class="sub">Reading chat… ${Math.round((d.progress || 0) * 100)}%. A 10-hour VOD takes about 7 minutes.</p></section>`
-    : `<section class="set-sec"><div class="spk-title"><div><h2>${esc(d.name || d.title || "Twitch video")} ${spkBadge(spkDone(d))}</h2><p class="sub">${d.name && d.title ? `${esc(d.title)} · ` : ""}${esc(d.streamer)} · ${hms(d.length)} · <a href="https://www.twitch.tv/videos/${esc(d.id)}" target="_blank" rel="noopener">Open on Twitch</a></p></div>
+    : scanning ? `<section class="set-sec"><h2>${esc(d.name || d.title || (d.platform === "youtube" ? "YouTube stream" : "Twitch video"))}</h2><p class="sub">${esc(d.streamer)} · ${hms(d.length)}</p>
+        <div class="spk-prog"><i style="width:${Math.round((d.progress || 0) * 100)}%"></i></div><p class="sub">Reading chat… ${Math.round((d.progress || 0) * 100)}%. ${d.platform === "youtube" ? "A 10-hour stream takes about 3 minutes, a quiet one much less." : "A 10-hour VOD takes about 7 minutes."}</p></section>`
+    : `<section class="set-sec"><div class="spk-title"><div><h2>${esc(d.name || d.title || (d.platform === "youtube" ? "YouTube stream" : "Twitch video"))} ${spkBadge(spkDone(d))}</h2><p class="sub">${d.name && d.title ? `${esc(d.title)} · ` : ""}${esc(d.streamer)} · ${hms(d.length)} · <a href="${esc(d.url || `https://www.twitch.tv/videos/${d.id}`)}" target="_blank" rel="noopener">Open on ${d.platform === "youtube" ? "YouTube" : "Twitch"}</a></p></div>
         <button class="btn sm icon ghost" data-act="spkdel" data-k="${esc(d.id)}" title="Remove this scan" aria-label="Remove this scan">${ic("trash")}</button></div>
         ${spkGraph(d)}
         <label class="spk-sens">How picky<input type="range" id="spks" min="0.5" max="2" step="0.1" value="${SPK.s}"><span>${SPK.s <= 0.8 ? "More spikes" : SPK.s >= 1.3 ? "Fewer spikes" : "Normal"} · big ${(3 * SPK.s).toFixed(1)}×, worth a look ${(2.5 * SPK.s).toFixed(1)}×</span></label>

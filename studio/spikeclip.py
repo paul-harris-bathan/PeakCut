@@ -57,9 +57,16 @@ def need_keys():
         raise NotReady("Add your ElevenLabs key on the AI page first: spike clips use it to write down what is said.")
 
 
-def creator_for(login: str):
-    """The streamer in PeakCut whose Twitch channel this is, if there is one."""
+def creator_for(login: str, scan: dict | None = None):
+    """The streamer in PeakCut whose channel this is (Twitch, or YouTube for a YouTube stream), if there is one."""
     login = (login or "").lower()
+    if (scan or {}).get("platform") == "youtube":
+        cid = str(scan.get("channel_id") or "").lower()
+        for c in creators.all_creators():
+            link = str((c.get("channels") or {}).get("youtube") or "").lower()
+            if (login and re.search(r"/@" + re.escape(login) + r"(?:[/?#]|$)", link)) or (cid and cid in link):
+                return c["id"]
+        return None
     if not login:
         return None
     for c in creators.all_creators():
@@ -89,9 +96,9 @@ def clip_spikes(scan: dict, times: list, why: str = "picked", template: str | No
     fresh = not job
     if fresh:             # a new video is born "queued", but is only in the line once enqueue() puts it there (below)
         named = scan.get("name") or scan.get("title") or ""     # the name given before the scan, else Twitch's title
-        job = jobs.create({"type": "url", "url": f"https://www.twitch.tv/videos/{vid}", "name": named},
+        job = jobs.create({"type": "url", "url": scan.get("url") or f"https://www.twitch.tv/videos/{vid}", "name": named},
                           {"template": tid} if tid else {},
-                          enqueue=False, creator=creator_for(scan.get("login")), kind="spikes")
+                          enqueue=False, creator=creator_for(scan.get("login"), scan), kind="spikes")
         job.update(vod=vid, spikes=[], title=named, uploader=scan.get("streamer") or "",
                    duration=float(scan.get("length") or 0), stage="Waiting")
     if scan.get("muted") is not None:
@@ -275,9 +282,11 @@ def _hms(t) -> str:
 def vod_jobs(vid: str) -> list:
     """This user's videos made from a Twitch VOD: its spike video, and the VOD clipped whole ("Clip this")."""
     out = []
+    from . import ytchat
     for j in jobs.list_jobs():
         url = str((j.get("source") or {}).get("url") or "")
-        if (j.get("kind") == "spikes" and j.get("vod") == vid) or re.search(r"/videos/" + re.escape(vid) + r"(?:\D|$)", url):
+        same = ytchat.video_id(url) == vid[3:] if vid.startswith("yt-") else bool(re.search(r"/videos/" + re.escape(vid) + r"(?:\D|$)", url))
+        if (j.get("kind") == "spikes" and j.get("vod") == vid) or same:
             out.append(jobs.get(j["id"]) or j)
     return out
 
